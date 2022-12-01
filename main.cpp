@@ -68,6 +68,8 @@ int main(int argc, const char *argv[]) {
 		input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 	}
 
+	archives.front().CompareFile("/home/lil-g/workspace/sonicriderste/data/files/10METAL.dat");
+
 	for (auto &archive : archives) {
 		archive.WriteFile();
 	}

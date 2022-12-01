@@ -63,7 +63,7 @@ namespace DatPak {
 		//    audio_info_data += audio_info_struct
 		std::vector<uint8_t> audio_info_data(templateDataHeader.begin(), templateDataHeader.end());
 		audio_info_data[0x11] = delta_file_count;
-		for (int i = 0; i < file_count; i++) {
+		for (uint8_t i = 0; i < file_count; i++) {
 			std::vector<uint8_t> audio_info_struct(templateDataStruct.begin(), templateDataStruct.end());
 			audio_info_struct[0x0] = i;
 			audio_info_struct[0x3] = i;
@@ -78,7 +78,7 @@ namespace DatPak {
 		std::vector<uint8_t> audio_data;
 		PushBytes(audio_data, std::string_view("gcaxPCMD"));
 		PushBytes(audio_data, swap_endian<uint32_t>(0x024a0100));
-		template_main_body.insert(template_main_body.end(), 20, '\0');
+		audio_data.insert(audio_data.end(), 0x10, '\0');
 
 		//for wavfilepath in files:
 		int maxId = std::prev(Files->end())->first;
@@ -265,7 +265,7 @@ namespace DatPak {
 		size_t eoi_msb = findMsbPosition(end_of_info);
 
 		//audio_data_start_offset = 1 << eoi_msb + 1
-		size_t audio_data_start_offset = (1 << eoi_msb) + 1; // Todo check if this is accurate
+		size_t audio_data_start_offset = 1 << (eoi_msb + 1);
 
 		//full_file_length = align_256bit(audio_data_start_offset + len(audio_data))
 		size_t full_file_length = align<256>(audio_data_start_offset + audio_data.size());
@@ -293,11 +293,22 @@ namespace DatPak {
 		//replace_int_bytearray(template_main_body, 0xBC, end_of_info)
 		replaceIntBytearray(template_main_body, 0xBC, end_of_info);
 
-		Dat.reserve(template_main_body.size() + audio_data.size() + file_entry_data.size());
+		Dat.reserve(full_file_length);
 
+		//outfile.write(template_main_body)
 		Dat.insert(Dat.end(), template_main_body.begin(), template_main_body.end());
-		Dat.insert(Dat.end(), audio_data.begin(), audio_data.end());
+		//outfile.write(audio_info_data)
+		Dat.insert(Dat.end(), audio_info_data.begin(), audio_info_data.end());
+		//outfile.write(file_entry_data)
 		Dat.insert(Dat.end(), file_entry_data.begin(), file_entry_data.end());
+		//while outfile.tell() != audio_data_start_offset:
+		//    outfile.write(b'\x00')
+		Dat.resize(audio_data_start_offset);
+		//outfile.write(audio_data)
+		Dat.insert(Dat.end(), audio_data.begin(), audio_data.end());
+		//while outfile.tell() != full_file_length:
+		//    outfile.write(b'\x00')
+		Dat.resize(full_file_length);
 	}
 
 	GCAXArchive::~GCAXArchive() = default;
@@ -305,7 +316,7 @@ namespace DatPak {
 	void GCAXArchive::WriteFile(const fs::path &filePath, bool overRideFileName) {
 		auto &path = overRideFileName ? filePath : filePath / FileName;
 #ifndef NDEBUG
-		std::cout << "Writing file '" << path << "'" << std::endl;
+		std::cout << "Writing file: " << path << std::endl;
 #endif
 		std::ofstream out(path, std::ios_base::binary | std::ios_base::out);
 		out.write(reinterpret_cast<const char *>(Dat.data()), Dat.size());
@@ -323,7 +334,7 @@ namespace DatPak {
 		compare.resize(fileSize);
 		compareFile.read(reinterpret_cast<std::ifstream::char_type*>(&compare.front()), fileSize);
 
-		bool difference = false;
+		size_t differences = 0;
 		const int addrWidth = 8, valWidth = 10;
 		for(size_t i = 0; i < fileSize; i++){
 			unsigned short val1 = -1, val2 = -1;
@@ -331,18 +342,19 @@ namespace DatPak {
 			if(compare.size() > i ) val2 = compare[i];
 
 			if(val1 == val2) continue;
-			if(!difference){
+			if(!differences){
 				std::cout << std::left << std::setw(addrWidth) 	<< std::setfill(' ') << "Address" << '|';
 				std::cout << std::left << std::setw(valWidth) 	<< std::setfill(' ') << "Created" << '|';
 				std::cout << std::left << std::setw(valWidth) 	<< std::setfill(' ') << "Compare" << std::endl;
-				difference = true;
 			}
+			differences++;
+			continue;
 
 			std::cout << std::hex	<< std::left << std::setw(addrWidth)	<< std::setfill(' ') << i		<< '|';
 			std::cout 				<< std::left << std::setw(valWidth)		<< std::setfill(' ') << val1	<< '|';
 			std::cout 				<< std::left << std::setw(valWidth)		<< std::setfill(' ') << val2	<< std::endl;
 		}
-		if(!difference){
+		if(!differences){
 			std::cout << "No differences detected." << std::endl;
 		}
 	}
