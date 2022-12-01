@@ -1,8 +1,11 @@
-#include <iostream>
 #include <fstream>
 #include <map>
 #include <algorithm>
 #include <list>
+
+#include <fmt/core.h>
+#include <fmt/color.h>
+
 
 #include <cassert>
 
@@ -22,8 +25,6 @@ int main(int argc, const char *argv[]) {
 	fs::create_directory(outputDir); // Create directory if it doesn't exist
 
 	std::ifstream input(mainConf);
-
-	std::cout << std::hex << std::uppercase;
 
 	while (input.good()) {
 		auto peek = input.peek();
@@ -62,16 +63,14 @@ int main(int argc, const char *argv[]) {
 
 			processVoiceFiles(parent, folderConf, id, outputFilename);
 		} catch (std::exception &err){
-			std::cerr << err.what() << std::endl;
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
 		}
 
 		input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 	}
 
-	archives.front().CompareFile("/home/lil-g/workspace/sonicriderste/data/files/10METAL.dat");
-
 	for (auto &archive : archives) {
-		archive.WriteFile();
+		archive.WriteFile(outputDir);
 	}
 }
 
@@ -128,23 +127,21 @@ void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 		config >> std::ws >> indexStr >> std::ws;
 		std::getline(config, soundPath);
 		if(soundPath[soundPath.size()-1] == '\r'){
-			soundPath.erase(soundPath.length()-1); // Remove carriage return from path if reading a windows file on linux
+			soundPath.erase(soundPath.length()-1); // Remove carriage return from path if reading a Windows file on linux
 		}
 
-		//config.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 
 		if (!config) break;
 
 		uint8_t index = std::stoi(indexStr, nullptr, 0);
 		fs::path sound = parent / soundPath;
 		if (!fs::exists(sound)) {
-			std::cerr << sound << " isn't a valid file, skipping" << std::endl;
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} isn't a valid file, skipping\n", sound.string());
 			continue;
 		}
 
 		if (files.count(index)) {
-			std::cerr << "Warning: ID '0x" << +index << "' is replacing '" << files[index] << "' with '"
-					  << soundPath << "'" << std::endl;
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "Warning: ID '0x{:2X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPath);
 		}
 
 		files[index] = sound; // Will overwrite
@@ -154,9 +151,9 @@ void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 	archives.emplace_back(id, fileName, std::move(fileMap));
 
 #ifndef NDEBUG
-	std::cout << "Files from '" << configFile.string() << "': " << std::endl;
+	fmt::print("Files from '{}': \n", configFile.string());
 	for (auto iter = files.begin(); iter != files.end(); iter++) {
-		std::cout << "\t0x" << +iter->first << ": " << iter->second << std::endl;
+		fmt::print("\t0x{:02X}: {}\n", +iter->first, iter->second.string());
 	}
 #endif
 }

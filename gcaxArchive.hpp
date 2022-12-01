@@ -39,6 +39,8 @@ namespace DatPak {
 		[[maybe_unused]] uint32_t data_size;
 	};
 
+	bool verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile);
+
 	/** Check if a number is a power of 2 or not.
     *  IF n is power of 2, return true, else return false.
     */
@@ -53,6 +55,12 @@ namespace DatPak {
 		const size_t shift = alignTo - 1;
 
 		return (num + shift) & ~shift;
+	}
+
+	template<int alignTo, typename T>
+	void alignContainer(T &container) {
+		size_t aligned = align<alignTo>(container.size());
+		container.resize(aligned);
 	}
 
 	constexpr size_t findMsbPosition(size_t n) {
