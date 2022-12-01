@@ -2,7 +2,9 @@
 #include <utility>
 #include <vector>
 #include <fstream>
-#include <iostream>
+
+#include <fmt/core.h>
+#include <fmt/color.h>
 
 #include "gcaxArchive.hpp"
 #include "include/dsptool.h"
@@ -14,11 +16,14 @@ namespace DatPak {
 #include "data/templateMainBody.inc"
 #include "data/EmptySound.inc"
 
-	GCAXArchive::GCAXArchive(const uint16_t &id, std::string fileName,
-							 std::unique_ptr<std::map<uint8_t, fs::path>> &&files) : ID(id),
-																					 Files(std::move(files)),
-																					 FileName(std::move(fileName).append(".dat")) {
-		if(Files->empty()) throw std::invalid_argument("List of files for archive was empty");
+	GCAXArchive::GCAXArchive(
+			const uint16_t &id,
+			std::string fileName,
+			std::unique_ptr<std::map<uint8_t, fs::path>> &&files)
+			: ID(id),
+			  Files(std::move(files)),
+			  FileName(std::move(fileName).append(".dat")) {
+		if (Files->empty()) throw std::invalid_argument("List of files for archive was empty");
 
 		std::vector<uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
 		uint8_t file_count = Files->size();
@@ -76,9 +81,9 @@ namespace DatPak {
 
 		//audio_data = bytearray(struct.pack('>8sI20x', bytes('gcaxPCMD', 'ascii'), 0x024a0100))
 		std::vector<uint8_t> audio_data;
-		PushBytes(audio_data, std::string_view("gcaxPCMD"));
+		PushBytes(audio_data, std::string("gcaxPCMD"));
 		PushBytes(audio_data, swap_endian<uint32_t>(0x024a0100));
-		audio_data.insert(audio_data.end(), 0x10, '\0');
+		audio_data.insert(audio_data.end(), 20, '\0');
 
 		//for wavfilepath in files:
 		int maxId = std::prev(Files->end())->first;
@@ -100,9 +105,12 @@ namespace DatPak {
 					std::string_view bufStr(buf, 4);
 					wavFile.read(buf, 4);
 					if (bufStr.compare(0, 4, "RIFF")) {
-						std::cerr << "Invalid WAV file: " << wavFilePath
-								  << ". Needs to be encoded in the RIFF format. Replacing with empty file."
-								  << std::endl;
+						fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+								   "Invalid WAV file: {}. Needs to be encoded in the RIFF format. Replacing with empty file.\n",
+								   wavFilePath.string());
+						//std::cerr << "Invalid WAV file: " << wavFilePath
+						//		  << ". Needs to be encoded in the RIFF format. Replacing with empty file."
+						//		  << std::endl;
 						goto UseEmpty;
 					}
 				}
@@ -116,8 +124,11 @@ namespace DatPak {
 					std::string_view bufStr(buf, 4);
 					wavFile.read(buf, 4);
 					if (bufStr.compare(0, 4, "WAVE")) {
-						std::cerr << "Invalid WAV file: " << wavFilePath
-								  << ". This is not a .wav file. Replacing with empty file." << std::endl;
+						fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+								   "Invalid WAV file: {}. This is not a .wav file. Replacing with empty file.\n",
+								   wavFilePath.string());
+						//std::cerr << "Invalid WAV file: " << wavFilePath
+						//		  << ". This is not a .wav file. Replacing with empty file." << std::endl;
 						goto UseEmpty;
 					}
 				}
@@ -131,8 +142,11 @@ namespace DatPak {
 					uint16_t format;
 					wavFile.read(reinterpret_cast<char *>(&format), 2);
 					if (format != 1) {
-						std::cerr << "WAV file " << wavFilePath
-								  << " is not formatted using PCM. Replacing with empty file." << std::endl;
+						fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+								   "Invalid WAV file: {}. This is not formatted using PCM. Replacing with empty file.\n",
+								   wavFilePath.string());
+						//std::cerr << "WAV file " << wavFilePath
+						//		  << " is not formatted using PCM. Replacing with empty file." << std::endl;
 						goto UseEmpty;
 					}
 				}
@@ -145,8 +159,11 @@ namespace DatPak {
 					uint16_t format;
 					wavFile.read(reinterpret_cast<char *>(&format), 2);
 					if (format != 1) {
-						std::cerr << "WAV file " << wavFilePath << " is not mono. Replacing with empty file."
-								  << std::endl;
+						fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+								   "Invalid WAV file: {}. This is not formatted as Mono. Replacing with empty file.\n",
+								   wavFilePath.string());
+						//std::cerr << "WAV file " << wavFilePath << " is not mono. Replacing with empty file."
+						//		  << std::endl;
 						goto UseEmpty;
 					}
 				}
@@ -195,7 +212,7 @@ namespace DatPak {
 						.unk = swap_endian(2),
 						.shifted_size = swap_endian((adpcm_byte_count << 1) - 1),
 						.unk2 = {0, 0, 0},
-						.unk3 = swap_endian<uint16_t>(0x200),
+						.unk3 = swap_endian(0x200),
 						.sample_rate = swap_endian<uint16_t>(sample_rate),
 						.data_size = swap_endian(adpcm_byte_count)
 				};
@@ -231,7 +248,7 @@ namespace DatPak {
 					.unk = swap_endian(2),
 					.shifted_size = swap_endian((adpcm_byte_count << 1) - 1),
 					.unk2 = {0, 0, 0},
-					.unk3 = swap_endian<uint16_t>(0x200),
+					.unk3 = swap_endian(0x200),
 					.sample_rate = swap_endian<uint16_t>(44100),
 					.data_size = swap_endian(adpcm_byte_count)
 			};
@@ -316,15 +333,17 @@ namespace DatPak {
 	void GCAXArchive::WriteFile(const fs::path &filePath, bool overRideFileName) {
 		auto &path = overRideFileName ? filePath : filePath / FileName;
 #ifndef NDEBUG
-		std::cout << "Writing file: " << path << std::endl;
+		fmt::print("Writing file: {}\n", path.string());
+		//std::cout << "Writing file: " << path << std::endl;
 #endif
 		std::ofstream out(path, std::ios_base::binary | std::ios_base::out);
 		out.write(reinterpret_cast<const char *>(Dat.data()), Dat.size());
 	}
 
 	void GCAXArchive::CompareFile(const fs::path &file) {
-		if(fs::status(file).type() != fs::file_type::regular){
-			std::cerr << file << " does not exist" << std::endl;
+		if (fs::status(file).type() != fs::file_type::regular) {
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} does not exist\n", file.string());
+			//std::cerr << file << " does not exist" << std::endl;
 			return;
 		}
 
@@ -332,30 +351,35 @@ namespace DatPak {
 		std::vector<uint8_t> compare;
 		auto fileSize = fs::file_size(file);
 		compare.resize(fileSize);
-		compareFile.read(reinterpret_cast<std::ifstream::char_type*>(&compare.front()), fileSize);
+		compareFile.read(reinterpret_cast<std::ifstream::char_type *>(&compare.front()), fileSize);
 
 		size_t differences = 0;
-		const int addrWidth = 8, valWidth = 10;
-		for(size_t i = 0; i < fileSize; i++){
+		//const int addrWidth = 8, valWidth = 10;
+		for (size_t i = 0; i < fileSize; i++) {
 			unsigned short val1 = -1, val2 = -1;
-			if(Dat.size() > i ) val1 = Dat[i];
-			if(compare.size() > i ) val2 = compare[i];
+			if (Dat.size() > i) val1 = Dat[i];
+			if (compare.size() > i) val2 = compare[i];
 
-			if(val1 == val2) continue;
-			if(!differences){
-				std::cout << std::left << std::setw(addrWidth) 	<< std::setfill(' ') << "Address" << '|';
-				std::cout << std::left << std::setw(valWidth) 	<< std::setfill(' ') << "Created" << '|';
-				std::cout << std::left << std::setw(valWidth) 	<< std::setfill(' ') << "Compare" << std::endl;
+			if (val1 == val2) continue;
+			if (!differences) {
+				fmt::print("{:^7}|{:^7}|{:^7}\n", "Address", "Created", "Compare");
+				//std::cout << std::left << std::setw(addrWidth) << std::setfill(' ') << "Address" << '|';
+				//std::cout << std::left << std::setw(valWidth) << std::setfill(' ') << "Created" << '|';
+				//std::cout << std::left << std::setw(valWidth) << std::setfill(' ') << "Compare" << std::endl;
 			}
-			differences++;
-			continue;
 
-			std::cout << std::hex	<< std::left << std::setw(addrWidth)	<< std::setfill(' ') << i		<< '|';
-			std::cout 				<< std::left << std::setw(valWidth)		<< std::setfill(' ') << val1	<< '|';
-			std::cout 				<< std::left << std::setw(valWidth)		<< std::setfill(' ') << val2	<< std::endl;
+			fmt::print("{:^7X}|{:^7X}|{:^7X}\n", i, val1, val2);
+			//std::cout << std::hex << std::left << std::setw(addrWidth) << std::setfill(' ') << i << '|';
+			//std::cout << std::left << std::setw(valWidth) << std::setfill(' ') << val1 << '|';
+			//std::cout << std::left << std::setw(valWidth) << std::setfill(' ') << val2 << std::endl;
+			differences++;
 		}
-		if(!differences){
-			std::cout << "No differences detected." << std::endl;
+		if (!differences) {
+			fmt::print("No differences detected.\n");
+			//std::cout << "No differences detected." << std::endl;
+		} else {
+			fmt::print("{} differences detected.\n", differences);
+			//std::cout << std::dec << differences << " differences detected." << std::endl;
 		}
 	}
 
