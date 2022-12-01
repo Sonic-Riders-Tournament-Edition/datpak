@@ -11,28 +11,32 @@
 
 namespace fs = std::filesystem;
 
+extern size_t verbose; // main.cpp
+
 namespace DatPak {
 	class GCAXArchive {
 		const uint16_t ID;
 		const std::string FileName;
-		std::unique_ptr<std::map<uint8_t, fs::path>> Files;
-		std::vector<uint8_t> Dat;
+		std::unique_ptr <std::map<uint8_t, fs::path>> Files;
+		std::vector <uint8_t> Dat;
 
 		uint32_t spec1; // Todo: Give these a real name
-		uint32_t spec2;	// For now, they match the DATFile struct names
+		uint32_t spec2;    // For now, they match the DATFile struct names
 	public:
-		GCAXArchive(const uint16_t &id, std::string fileName, std::unique_ptr<std::map<uint8_t, fs::path>> &&files);
+		GCAXArchive(const uint16_t &id, std::string fileName, std::unique_ptr <std::map<uint8_t, fs::path>> &&files);
+
 		~GCAXArchive();
 
-		void WriteFile(const fs::path &filePath = "", bool overRideFileName = false);
-		void CompareFile(const fs::path &file);
+		void WriteFile(const fs::path &filePath = "");
+
+		[[maybe_unused]] void CompareFile(const fs::path &file);
 	};
 
 	struct FileEntry{
 		[[maybe_unused]] uint32_t start_offset;
 		[[maybe_unused]] int32_t unk;
 		[[maybe_unused]] uint32_t shifted_size;
-		std::array<int16_t, 16> coef;
+		std::array<int16_t, 16> coefficient;
 		std::array<int32_t, 3> unk2;
 		[[maybe_unused]] int32_t unk3;
 		[[maybe_unused]] uint16_t sample_rate;
@@ -107,6 +111,6 @@ namespace DatPak {
 	template<>
 	void PushBytes<std::string>(std::vector<uint8_t> &vector, const std::string &val);
 
-	template<>
-	void PushBytes<std::string_view>(std::vector<uint8_t> &vector, const std::string_view &val);
+template<>
+[[maybe_unused]] void PushBytes<std::string_view>(std::vector <uint8_t> &vector, const std::string_view &val);
 } // DatPak

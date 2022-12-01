@@ -1,11 +1,11 @@
 #include <fstream>
 #include <map>
-#include <algorithm>
 #include <list>
 
 #include <fmt/core.h>
 #include <fmt/color.h>
 
+#include <cxxopts.hpp>
 
 #include <cassert>
 
@@ -13,112 +13,118 @@
 
 auto archives = std::list<DatPak::GCAXArchive>();
 
+size_t verbose;
+
 int main(int argc, const char *argv[]) {
-	fs::path mainConf;
-	std::vector<std::string> args;
-	for (int i = 0; i < argc; i++) {
-		args.emplace_back(argv[i]);
-	}
-	getMainConfig(mainConf, args);
+	try {
+		cxxopts::Options options("DatPak", "Creates GCAX sound archives to be used by Sonic Riders");
+		options.add_options()
+				("c,config", "Config File path", cxxopts::value<fs::path>()->default_value("config.txt"))
+				("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"))
+				("v,verbose", "Verbose output"); // Implicitly bool
+		options.parse_positional({"config", "output", "_"});
+		auto result = options.parse(argc, argv);
 
-	fs::path outputDir("Output/");
-	fs::create_directory(outputDir); // Create directory if it doesn't exist
+		verbose = result["verbose"].count();
 
-	std::ifstream input(mainConf);
+		fs::path config = result["config"].as<fs::path>();
+		fs::path output = result["output"].as<fs::path>();
 
-	while (input.good()) {
-		auto peek = input.peek();
-		while (peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore whitespace and empty newlines
-			input.ignore();
-			peek = input.peek();
+		fs::path configParent;
+		if (fs::is_directory(config)) {
+			configParent = config;
+			config.append("config.txt");
+		} else {
+			configParent = config.parent_path();
 		}
-		if (peek == '#'){
-			input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
-			continue; // Skip comments
+
+		if (verbose > 0) {
+			fmt::print("Loaded config {}, outputting to {}\n", config.string(), output.string());
 		}
 
-		std::string folderName, idStr;
-		input >> std::ws >> folderName >> idStr;
+		fs::create_directory(output); // Create directory if it doesn't exist
 
-		if (input.fail()) break;
+		std::ifstream input(config);
 
-		auto id = static_cast<uint16_t>(std::stoi(idStr, nullptr, 0));
-		assert(id != 0);
+		if (!input) {
+			throw std::runtime_error("Main config file stream failed to open");
+		}
 
-		try{
-			fs::path folderConf = getFolderConfig(folderName);
-
-			fs::path parent = folderConf.parent_path();
-
-			input.clear();
-
-			std::string outputFilename = parent.filename().string();
-			int ret = input.peek();
-			if (ret != '\n' && ret != '\r' && ret != ' ') {
-				input >> outputFilename;
-				if (input.good()) {
-
+		while (input.good()) {
+			auto peek = input.peek();
+			while (peek == '\r' || peek == '\n' || peek == ' ' ||
+				   peek == '\t') { // ignore whitespace and empty newlines
+				input.ignore();
+				peek = input.peek();
+			}
+			if (peek == '#') {
+				input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
+				if (verbose > 1) {
+					fmt::print("Skipping comment, going to next line\n");
 				}
+				continue; // Skip comments
 			}
 
-			processVoiceFiles(parent, folderConf, id, outputFilename);
-		} catch (std::exception &err){
-			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+			fs::path bankConf;
+			std::string idStr;
+			input >> std::ws >> bankConf >> idStr;
+
+			if (input.fail()) break;
+			if (bankConf.is_relative()) bankConf = configParent / bankConf;
+
+			auto id = static_cast<uint16_t>(std::stoi(idStr, nullptr, 0));
+			assert(id != 0);
+
+			try {
+				if (fs::is_directory(bankConf)) bankConf.append("config.txt");
+
+				fs::path bankDir = bankConf.parent_path();
+
+				input.clear();
+
+				std::string outputFilename = bankDir.filename().string();
+				int ret = input.peek();
+				if (ret != '\n' && ret != '\r' && ret != ' ') {
+					input >> outputFilename;
+				}
+
+				processVoiceFiles(bankDir, bankConf, id, outputFilename);
+			} catch (std::exception &err) {
+				fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+			}
+
+			input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 		}
 
-		input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
-	}
-
-	for (auto &archive : archives) {
-		archive.WriteFile(outputDir);
-	}
-}
-
-void getMainConfig(fs::path &path, const std::vector<std::string> &args) {
-	if (args.size() > 1) {
-		fs::path argPath(args[1]);
-		switch (fs::status(argPath).type()) {
-			case fs::file_type::regular:
-				path = argPath;
-				return;
-			case fs::file_type::directory:
-				fs::current_path(argPath);
-				[[fallthrough]];
-			default:
-				break;
+		for (auto &archive: archives) {
+			archive.WriteFile(output);
 		}
+	} catch (cxxopts::OptionException &err) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+		return 1;
+	} catch (fs::filesystem_error &err) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+		return 2;
+	} catch (std::exception &err) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+		return -1;
 	}
-	path = fs::path("config.txt");
 }
 
-fs::path getFolderConfig(const std::string &folderName) {
-	fs::path folder = fs::path(folderName);
-	switch (fs::status(folder).type()) {
-		case fs::file_type::directory:
-			folder.append("config.txt");
-			if (fs::status(folder).type() == fs::file_type::regular) break;
-			[[fallthrough]];
-		case fs::file_type::not_found:
-			throw fs::filesystem_error("Unable to get folder config file", folder, std::make_error_code(std::errc::no_such_file_or_directory));
-		default:
-			break;
-	}
-	return std::move(folder);
-}
-
-void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, const std::string &fileName) {
+void
+processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, const std::string &fileName) {
 	std::ifstream config = std::ifstream(configFile);
 
-	auto fileMap = std::make_unique<std::map<uint8_t, fs::path>>();
-	std::map<uint8_t, fs::path> &files = *fileMap;
+	auto fileMap = std::make_unique < std::map < uint8_t, fs::path>>();
+	std::map <uint8_t, fs::path> &files = *fileMap;
 
 	while (config.good()) {
 		auto peek = config.peek();
-		while (peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore whitespace and empty newlines
+		while (peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t') { // ignore whitespace and empty newlines
 			config.ignore();
 			peek = config.peek();
 		}
-		if (peek == '#'){
+		if (peek == '#') {
 			config.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 			continue; // Skip comments
 		}
@@ -126,8 +132,9 @@ void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 		std::string indexStr, soundPath;
 		config >> std::ws >> indexStr >> std::ws;
 		std::getline(config, soundPath);
-		if(soundPath[soundPath.size()-1] == '\r'){
-			soundPath.erase(soundPath.length()-1); // Remove carriage return from path if reading a Windows file on linux
+		if (soundPath[soundPath.size() - 1] == '\r') {
+			soundPath.erase(
+					soundPath.length() - 1); // Remove carriage return from path if reading a Windows file on linux
 		}
 
 
@@ -136,12 +143,14 @@ void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 		uint8_t index = std::stoi(indexStr, nullptr, 0);
 		fs::path sound = parent / soundPath;
 		if (!fs::exists(sound)) {
-			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} isn't a valid file, skipping\n", sound.string());
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} isn't a valid file, skipping\n",
+					   sound.string());
 			continue;
 		}
 
 		if (files.count(index)) {
-			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "Warning: ID '0x{:2X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPath);
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+					   "Warning: ID '0x{:2X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPath);
 		}
 
 		files[index] = sound; // Will overwrite
@@ -150,10 +159,10 @@ void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 
 	archives.emplace_back(id, fileName, std::move(fileMap));
 
-#ifndef NDEBUG
-	fmt::print("Files from '{}': \n", configFile.string());
-	for (auto iter = files.begin(); iter != files.end(); iter++) {
-		fmt::print("\t0x{:02X}: {}\n", +iter->first, iter->second.string());
+	if (verbose > 0) {
+		fmt::print("Files from '{}': \n", configFile.string());
+		for (auto iter = files.begin(); iter != files.end(); iter++) {
+			fmt::print("\t0x{:02X}: {}\n", +iter->first, iter->second.string());
+		}
 	}
-#endif
 }

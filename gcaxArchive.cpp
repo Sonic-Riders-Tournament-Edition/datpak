@@ -18,23 +18,123 @@ namespace DatPak {
 
 } // DatPak
 
+void DatPak::GCAXArchive::WriteFile(const fs::path &filePath) {
+	auto &path = fs::is_directory(filePath) ? filePath / FileName : filePath;
+	if (verbose > 0) {
+		fmt::print("Writing file: {}\n", path.string());
+	}
+	std::ofstream out(path, std::ios_base::binary | std::ios_base::out);
+	out.write(reinterpret_cast<const char *>(Dat.data()), static_cast<std::streamsize>(Dat.size()));
+}
+
+void DatPak::GCAXArchive::CompareFile(const fs::path &file) {
+	if (fs::status(file).type() != fs::file_type::regular) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} does not exist\n", file.string());
+		return;
+	}
+
+	std::ifstream compareFile(file);
+	std::vector <uint8_t> compare;
+	auto fileSize = fs::file_size(file);
+	compare.resize(fileSize);
+	compareFile.read(reinterpret_cast<std::ifstream::char_type *>(&compare.front()),
+					 static_cast<std::streamsize>(fileSize));
+
+	size_t differences = 0;
+	//const int addrWidth = 8, valWidth = 10;
+	for (size_t i = 0; i < fileSize; i++) {
+		unsigned short val1 = -1, val2 = -1;
+		if (Dat.size() > i) val1 = Dat[i];
+		if (compare.size() > i) val2 = compare[i];
+
+		if (val1 == val2) continue;
+		if (differences == 0) {
+			fmt::print("{:^7}|{:^7}|{:^7}\n", "Address", "Created", "Compare");
+		}
+
+		fmt::print("{:^7X}|{:^7X}|{:^7X}\n", i, val1, val2);
+		differences++;
+	}
+	if (differences == 0) {
+		fmt::print("No differences detected.\n");
+	} else {
+		fmt::print("{} differences detected.\n", differences);
+	}
+}
+
+template<>
+void DatPak::PushBytes<std::string>(std::vector <uint8_t> &vector, const std::string &val) {
+	vector.insert(vector.end(), val.begin(), val.end());
+}
+
+template<>
+void DatPak::PushBytes<std::string_view>(std::vector <uint8_t> &vector, const std::string_view &val) {
+	vector.insert(vector.end(), val.begin(), val.end());
+}
+
+bool DatPak::verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile) {
+	wavFile.seekg(0);
+	char buf[4];
+	std::string_view bufStr(buf, 4);
+	wavFile.read(buf, 4);
+	if (bufStr.compare(0, 4, "RIFF")) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+				   "Invalid WAV file: {}. Needs to be encoded in the RIFF format. Replacing with empty file.\n",
+				   wavFilePath.string());
+		return false;
+	}
+
+	wavFile.seekg(0x8);
+
+	wavFile.read(buf, 4);
+	if (bufStr.compare(0, 4, "WAVE")) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+				   "Invalid WAV file: {}. This is not a .wav file. Replacing with empty file.\n",
+				   wavFilePath.string());
+		return false;
+	}
+
+	wavFile.seekg(0x14);
+
+	uint16_t format;
+	wavFile.read(reinterpret_cast<char *>(&format), 2);
+	if (format != 1) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+				   "Invalid WAV file: {}. This is not formatted using PCM. Replacing with empty file.\n",
+				   wavFilePath.string());
+		return false;
+	}
+
+	wavFile.read(reinterpret_cast<char *>(&format), 2);
+	if (format != 1) {
+		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
+				   "Invalid WAV file: {}. This is not formatted as Mono. Replacing with empty file.\n",
+				   wavFilePath.string());
+		return false;
+	}
+
+	return true;
+}
+
+DatPak::GCAXArchive::~GCAXArchive() = default;
+
 DatPak::GCAXArchive::GCAXArchive(
 		const uint16_t &id,
 		std::string fileName,
-		std::unique_ptr<std::map<uint8_t, fs::path>> &&files)
+		std::unique_ptr <std::map<uint8_t, fs::path>> &&files)
 		: ID(id),
-		  Files(std::move(files)),
-		  FileName(std::move(fileName).append(".dat")) {
+		  FileName(std::move(fileName).append(".dat")),
+		  Files(std::move(files)) {
 	if (Files->empty()) throw std::invalid_argument("List of files for archive was empty");
 
 	// First we copy the data template over
-	std::vector<uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
+	std::vector <uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
 	uint8_t file_count = Files->size();
 	uint8_t delta_file_count = file_count - 1;
 
 	// Next we add this archives ID and index of the last file, plus some magic numbers
 	PushBytes(template_main_body, swap_endian(ID));
-	PushBytes(template_main_body, swap_endian<uint16_t>(0x08));
+	PushBytes(template_main_body, swap_endian < uint16_t > (0x08));
 	PushBytes(template_main_body, swap_endian(delta_file_count));
 	PushBytes(template_main_body, std::array<uint8_t, 3>{0});
 
@@ -54,7 +154,7 @@ DatPak::GCAXArchive::GCAXArchive(
 		template_main_body.push_back(0xFF);
 	}
 
-	// Now we align our data to a 4-bit boundry
+	// Now we align our data to a 4-bit boundary
 	alignContainer<4>(template_main_body);
 
 	// Copy over the audio header template data and assign the correct last file index
@@ -100,39 +200,39 @@ DatPak::GCAXArchive::GCAXArchive(
 			wavFile.read(reinterpret_cast<char *>(&data_length), 4);
 
 			// Make this a unique pointer, so it will always free itself when out of scope
-			std::unique_ptr<int16_t[]> inwav(new int16_t[data_length]);
-			wavFile.read(reinterpret_cast<char *>(inwav.get()), data_length);
+			std::unique_ptr < int16_t[] > inWav(new int16_t[data_length]);
+			wavFile.read(reinterpret_cast<char *>(inWav.get()), data_length);
 
 			// Samples are stored as signed 16-bit, so the sample count is half of the available data
 			uint32_t sample_count = data_length / 2;
 			uint32_t adpcm_byte_count = getBytesForAdpcmBuffer(sample_count);
 
-			std::unique_ptr<uint8_t[]> outpcm(new uint8_t[adpcm_byte_count]);
+			std::unique_ptr < uint8_t[] > outPCM(new uint8_t[adpcm_byte_count]);
 			ADPCMINFO info;
 
 			// Encode our wav data into ADPCM
-			encode(inwav.get(), outpcm.get(), &info, sample_count);
+			encode(inWav.get(), outPCM.get(), &info, sample_count);
 
-			FileEntry fileentry{
-					.start_offset = swap_endian<uint32_t>(audio_data.size()),
+			FileEntry fileEntry{
+					.start_offset = swap_endian < uint32_t > (audio_data.size()),
 					.unk = swap_endian(2),
 					.shifted_size = swap_endian((adpcm_byte_count << 1) - 1),
 					.unk2 = {0, 0, 0},
 					.unk3 = swap_endian(0x200),
-					.sample_rate = swap_endian<uint16_t>(sample_rate),
+					.sample_rate = swap_endian < uint16_t > (sample_rate),
 					.data_size = swap_endian(adpcm_byte_count)
 			};
 
 			// There's no way to copy an array during initialization, so we have to do it here
 			for (int x = 0; x < 16; x++) {
-				fileentry.coef[x] = swap_endian(info.coef[x]);
+				fileEntry.coefficient[x] = swap_endian(info.coef[x]);
 			}
 
 			// Add our file entry header data
-			PushBytes(file_entry_data, fileentry);
+			PushBytes(file_entry_data, fileEntry);
 
 			// now the audio data itself
-			audio_data.insert(audio_data.end(), outpcm.get(), outpcm.get() + adpcm_byte_count);
+			audio_data.insert(audio_data.end(), outPCM.get(), outPCM.get() + adpcm_byte_count);
 
 			// Now we align to an 8-bit boundary
 			alignContainer<8>(audio_data);
@@ -146,27 +246,27 @@ DatPak::GCAXArchive::GCAXArchive(
 		int16_t sample_data[] = {1, 0};
 		uint32_t sample_count = 2;
 		uint32_t adpcm_byte_count = getBytesForAdpcmBuffer(sample_count);
-		uint8_t outpcm[adpcm_byte_count];
+		std::unique_ptr < uint8_t[] > outPCM(new uint8_t[adpcm_byte_count]);
 		ADPCMINFO info;
-		encode(sample_data, outpcm, &info, sample_count);
-		FileEntry fileentry{
-				.start_offset = swap_endian<uint32_t>(audio_data.size()),
+		encode(sample_data, outPCM.get(), &info, sample_count);
+		FileEntry fileEntry{
+				.start_offset = swap_endian < uint32_t > (audio_data.size()),
 				.unk = swap_endian(2),
 				.shifted_size = swap_endian((adpcm_byte_count << 1) - 1),
 				.unk2 = {0, 0, 0},
 				.unk3 = swap_endian(0x200),
-				.sample_rate = swap_endian<uint16_t>(44100),
+				.sample_rate = swap_endian < uint16_t > (44100),
 				.data_size = swap_endian(adpcm_byte_count)
 		};
 		for (int x = 0; x < 16; x++) {
-			fileentry.coef[x] = swap_endian(info.coef[x]);
+			fileEntry.coefficient[x] = swap_endian(info.coef[x]);
 		}
 
 		// Add our file entry header data
-		PushBytes(file_entry_data, fileentry);
+		PushBytes(file_entry_data, fileEntry);
 
 		// now the empty audio data
-		audio_data.insert(audio_data.end(), outpcm, outpcm + adpcm_byte_count);
+		audio_data.insert(audio_data.end(), outPCM.get(), outPCM.get() + adpcm_byte_count);
 
 		// Now we align to an 8-bit boundary
 		alignContainer<8>(audio_data);
@@ -216,103 +316,4 @@ DatPak::GCAXArchive::GCAXArchive(
 
 	// Align to the final length
 	Dat.resize(full_file_length);
-}
-
-DatPak::GCAXArchive::~GCAXArchive() = default;
-
-void DatPak::GCAXArchive::WriteFile(const fs::path &filePath, bool overRideFileName) {
-	auto &path = overRideFileName ? filePath : filePath / FileName;
-#ifndef NDEBUG
-	fmt::print("Writing file: {}\n", path.string());
-#endif
-	std::ofstream out(path, std::ios_base::binary | std::ios_base::out);
-	out.write(reinterpret_cast<const char *>(Dat.data()), Dat.size());
-}
-
-void DatPak::GCAXArchive::CompareFile(const fs::path &file) {
-	if (fs::status(file).type() != fs::file_type::regular) {
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} does not exist\n", file.string());
-		return;
-	}
-
-	std::ifstream compareFile(file);
-	std::vector<uint8_t> compare;
-	auto fileSize = fs::file_size(file);
-	compare.resize(fileSize);
-	compareFile.read(reinterpret_cast<std::ifstream::char_type *>(&compare.front()), fileSize);
-
-	size_t differences = 0;
-	//const int addrWidth = 8, valWidth = 10;
-	for (size_t i = 0; i < fileSize; i++) {
-		unsigned short val1 = -1, val2 = -1;
-		if (Dat.size() > i) val1 = Dat[i];
-		if (compare.size() > i) val2 = compare[i];
-
-		if (val1 == val2) continue;
-		if (!differences) {
-			fmt::print("{:^7}|{:^7}|{:^7}\n", "Address", "Created", "Compare");
-		}
-
-		fmt::print("{:^7X}|{:^7X}|{:^7X}\n", i, val1, val2);
-		differences++;
-	}
-	if (!differences) {
-		fmt::print("No differences detected.\n");
-	} else {
-		fmt::print("{} differences detected.\n", differences);
-	}
-}
-
-template<>
-void DatPak::PushBytes<std::string>(std::vector<uint8_t> &vector, const std::string &val) {
-	vector.insert(vector.end(), val.begin(), val.end());
-}
-
-template<>
-void DatPak::PushBytes<std::string_view>(std::vector<uint8_t> &vector, const std::string_view &val) {
-	vector.insert(vector.end(), val.begin(), val.end());
-}
-
-bool DatPak::verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile) {
-	wavFile.seekg(0);
-	char buf[4];
-	std::string_view bufStr(buf, 4);
-	wavFile.read(buf, 4);
-	if (bufStr.compare(0, 4, "RIFF")) {
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. Needs to be encoded in the RIFF format. Replacing with empty file.\n",
-				   wavFilePath.string());
-		return false;
-	}
-
-	wavFile.seekg(0x8);
-
-	wavFile.read(buf, 4);
-	if (bufStr.compare(0, 4, "WAVE")) {
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. This is not a .wav file. Replacing with empty file.\n",
-				   wavFilePath.string());
-		return false;
-	}
-
-	wavFile.seekg(0x14);
-
-	uint16_t format;
-	wavFile.read(reinterpret_cast<char *>(&format), 2);
-	if (format != 1) {
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. This is not formatted using PCM. Replacing with empty file.\n",
-				   wavFilePath.string());
-		return false;
-	}
-
-	wavFile.read(reinterpret_cast<char *>(&format), 2);
-	if (format != 1) {
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. This is not formatted as Mono. Replacing with empty file.\n",
-				   wavFilePath.string());
-		return false;
-	}
-
-	return true;
 }
