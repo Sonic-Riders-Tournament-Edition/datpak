@@ -5,4 +5,4 @@
 
 namespace fs = std::filesystem;
 
-void processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, const std::string &fileName);
+bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, fs::path filePath);

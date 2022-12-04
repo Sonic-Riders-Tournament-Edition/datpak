@@ -4,6 +4,7 @@
 #include <memory>
 #include <map>
 #include <filesystem>
+#include <vector>
 
 #include "gcem.hpp"
 
@@ -16,18 +17,18 @@ extern size_t verbose; // main.cpp
 namespace DatPak {
 	class GCAXArchive {
 		const uint16_t ID;
-		const std::string FileName;
+		const fs::path FilePath;
 		std::unique_ptr <std::map<uint8_t, fs::path>> Files;
-		std::vector <uint8_t> Dat;
+		std::vector<uint8_t> Dat;
 
 		uint32_t spec1; // Todo: Give these a real name
 		uint32_t spec2;    // For now, they match the DATFile struct names
 	public:
-		GCAXArchive(const uint16_t &id, std::string fileName, std::unique_ptr <std::map<uint8_t, fs::path>> &&files);
+		GCAXArchive(const uint16_t &id, fs::path &&filePath, std::unique_ptr <std::map<uint8_t, fs::path>> &&files);
 
 		~GCAXArchive();
 
-		void WriteFile(const fs::path &filePath = "");
+		void WriteFile();
 
 		[[maybe_unused]] void CompareFile(const fs::path &file);
 	};

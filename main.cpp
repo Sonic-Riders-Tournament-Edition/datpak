@@ -13,15 +13,19 @@
 
 auto archives = std::list<DatPak::GCAXArchive>();
 
+auto datFileInfo = std::map<std::string, std::tuple<uint32_t, uint32_t>>();
+
 size_t verbose;
 
 int main(int argc, const char *argv[]) {
+	uint_fast8_t errors = 0, generated = 0, skipped = 0;
 	try {
 		cxxopts::Options options("DatPak", "Creates GCAX sound archives to be used by Sonic Riders");
 		options.add_options()
+				("v,verbose", "Verbose output") // Implicitly bool
 				("c,config", "Config File path", cxxopts::value<fs::path>()->default_value("config.txt"))
-				("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"))
-				("v,verbose", "Verbose output"); // Implicitly bool
+				("h,header", "Generated header output path", cxxopts::value<fs::path>())
+				("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"));
 		options.parse_positional({"config", "output", "_"});
 		auto result = options.parse(argc, argv);
 
@@ -73,31 +77,40 @@ int main(int argc, const char *argv[]) {
 			if (bankConf.is_relative()) bankConf = configParent / bankConf;
 
 			auto id = static_cast<uint16_t>(std::stoi(idStr, nullptr, 0));
-			assert(id != 0);
+			//assert(id != 0);
 
 			try {
 				if (fs::is_directory(bankConf)) bankConf.append("config.txt");
+
+				if(!fs::exists(bankConf)) throw std::runtime_error(fmt::format("config file {} does not exist", bankConf.string()));
 
 				fs::path bankDir = bankConf.parent_path();
 
 				input.clear();
 
-				std::string outputFilename = bankDir.filename().string();
+				std::string outputFilePath = bankDir.filename().string();
 				int ret = input.peek();
 				if (ret != '\n' && ret != '\r' && ret != ' ') {
-					input >> outputFilename;
+					input >> outputFilePath;
 				}
 
-				processVoiceFiles(bankDir, bankConf, id, outputFilename);
+				outputFilePath += ".dat";
+
+				if(processVoiceFiles(bankDir, bankConf, id, output / outputFilePath)){
+					generated++;
+				} else {
+					skipped++;
+				}
 			} catch (std::exception &err) {
 				fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+				errors++;
 			}
 
 			input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 		}
 
 		for (auto &archive: archives) {
-			archive.WriteFile(output);
+			archive.WriteFile();
 		}
 	} catch (cxxopts::OptionException &err) {
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
@@ -109,10 +122,23 @@ int main(int argc, const char *argv[]) {
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
 		return -1;
 	}
+	if(verbose > 0){
+		if(errors){
+			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "\nFailed to generate {} files\n", errors);
+		}
+		fmt::print(fg(fmt::color::green) | fmt::emphasis::bold, "Successfully generated {} files\n", generated);
+		fmt::print(fg(fmt::color::green) | fmt::emphasis::bold, "{} files were unmodified\n", skipped);
+	}
 }
 
-void
-processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, const std::string &fileName) {
+bool
+processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, fs::path filePath) {
+	std::error_code ec;
+	fs::file_time_type fileTime = fs::last_write_time(filePath, ec);
+	bool modified = false;
+	if(ec){
+		modified = true;
+	}
 	std::ifstream config = std::ifstream(configFile);
 
 	auto fileMap = std::make_unique < std::map < uint8_t, fs::path>>();
@@ -129,9 +155,14 @@ processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint
 			continue; // Skip comments
 		}
 
+		if (!config) break;
+
 		std::string indexStr, soundPath;
 		config >> std::ws >> indexStr >> std::ws;
 		std::getline(config, soundPath);
+
+		if (!config) break;
+
 		if (soundPath[soundPath.size() - 1] == '\r') {
 			soundPath.erase(
 					soundPath.length() - 1); // Remove carriage return from path if reading a Windows file on linux
@@ -153,16 +184,25 @@ processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint
 					   "Warning: ID '0x{:2X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPath);
 		}
 
+		fs::file_time_type soundTime = fs::last_write_time(sound);
+		if(soundTime > fileTime){
+			modified = true;
+		}
+
 		files[index] = sound; // Will overwrite
 		//files.insert({index, sound}); // Doesn't overwrite
 	}
 
-	archives.emplace_back(id, fileName, std::move(fileMap));
+	if(!modified) return false;
+
+	archives.emplace_back(id, std::move(filePath), std::move(fileMap));
 
 	if (verbose > 0) {
 		fmt::print("Files from '{}': \n", configFile.string());
 		for (auto iter = files.begin(); iter != files.end(); iter++) {
-			fmt::print("\t0x{:02X}: {}\n", +iter->first, iter->second.string());
+			fmt::print("\t0x{:02X}: {}\n", +iter->first, iter->second.filename().string());
 		}
 	}
+
+	return true;
 }

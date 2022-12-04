@@ -18,12 +18,11 @@ namespace DatPak {
 
 } // DatPak
 
-void DatPak::GCAXArchive::WriteFile(const fs::path &filePath) {
-	auto &path = fs::is_directory(filePath) ? filePath / FileName : filePath;
+void DatPak::GCAXArchive::WriteFile() {
 	if (verbose > 0) {
-		fmt::print("Writing file: {}\n", path.string());
+		fmt::print("Writing file: {}\n\t0x{:X}\t0x{:X}\n", fs::absolute(FilePath).string(), spec1, spec2);
 	}
-	std::ofstream out(path, std::ios_base::binary | std::ios_base::out);
+	std::ofstream out(FilePath, std::ios_base::binary | std::ios_base::out);
 	out.write(reinterpret_cast<const char *>(Dat.data()), static_cast<std::streamsize>(Dat.size()));
 }
 
@@ -120,12 +119,12 @@ DatPak::GCAXArchive::~GCAXArchive() = default;
 
 DatPak::GCAXArchive::GCAXArchive(
 		const uint16_t &id,
-		std::string fileName,
+		fs::path &&filePath,
 		std::unique_ptr <std::map<uint8_t, fs::path>> &&files)
 		: ID(id),
-		  FileName(std::move(fileName).append(".dat")),
+		  FilePath(std::move(filePath)),
 		  Files(std::move(files)) {
-	if (Files->empty()) throw std::invalid_argument("List of files for archive was empty");
+	if (Files->empty()) throw std::invalid_argument(fmt::format("List of files for archive \"{}\" was empty", FilePath.string()));
 
 	// First we copy the data template over
 	std::vector <uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
