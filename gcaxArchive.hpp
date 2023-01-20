@@ -5,6 +5,7 @@
 #include <map>
 #include <filesystem>
 #include <vector>
+#include <array>
 
 #include "gcem.hpp"
 
@@ -20,17 +21,16 @@ namespace DatPak {
 		const fs::path FilePath;
 		std::unique_ptr <std::map<uint8_t, fs::path>> Files;
 		std::vector<uint8_t> Dat;
+		uint_fast8_t Warnings;
 
 		uint32_t spec1; // Todo: Give these a real name
 		uint32_t spec2;    // For now, they match the DATFile struct names
 	public:
 		GCAXArchive(const uint16_t &id, fs::path &&filePath, std::unique_ptr <std::map<uint8_t, fs::path>> &&files);
-
 		~GCAXArchive();
-
-		void WriteFile();
-
-		[[maybe_unused]] void CompareFile(const fs::path &file);
+		const uint_fast8_t& getWarningCount() const;
+		void WriteFile() const;
+		[[maybe_unused]] void CompareFile(const fs::path &file) const;
 	};
 
 	struct FileEntry{

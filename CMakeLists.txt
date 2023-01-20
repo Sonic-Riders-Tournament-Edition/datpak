@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 find_package(fmt)
 find_package(cxxopts)
+find_package(gcem)
 
 if (MSVC)
 	# Force to always compile with W4
@@ -20,6 +21,15 @@ elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic")
 else ()
 	message(WARNING "CMake flags for compiler aren't set for compiler ${CMAKE_CXX_COMPILER_ID}")
+endif ()
+
+option (FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
+if (${FORCE_COLORED_OUTPUT})
+	if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+		add_compile_options (-fdiagnostics-color=always)
+	elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+		add_compile_options (-fcolor-diagnostics)
+	endif ()
 endif ()
 
 add_executable(DatPak main.cpp gcaxArchive.cpp)
