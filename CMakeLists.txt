@@ -6,9 +6,10 @@ include_directories(include)
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_GLIBCXX_DEBUG")
 set(CMAKE_CXX_STANDARD 20)
 
-find_package(fmt)
-find_package(cxxopts)
-find_package(gcem)
+find_package(fmt REQUIRED)
+find_package(cxxopts REQUIRED)
+find_package(gcem REQUIRED)
+find_package(DspTool 1 REQUIRED)
 
 if (MSVC)
 	# Force to always compile with W4
@@ -33,4 +34,7 @@ if (${FORCE_COLORED_OUTPUT})
 endif ()
 
 add_executable(DatPak main.cpp gcaxArchive.cpp)
-target_link_libraries(DatPak PUBLIC DspTool fmt::fmt)
+target_link_libraries(DatPak PUBLIC DspTool::DspTool fmt::fmt)
+
+
+install(TARGETS DatPak RUNTIME)
