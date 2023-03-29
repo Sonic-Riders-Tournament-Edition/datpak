@@ -18,7 +18,7 @@ namespace DatPak {
 
 } // DatPak
 
-void DatPak::GCAXArchive::WriteFile() const {
+void DatPak::GCAXArchive::WriteFile(const fs::path &config) const {
 	if (Warnings) {
 		fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
 				   fs::absolute(FilePath).string(), spec1, spec2);
@@ -30,7 +30,9 @@ void DatPak::GCAXArchive::WriteFile() const {
 	out.close(); // Make sure this is closed for Windows systems
 	if (Warnings) {
 		// Clear the modified time if there were any issues, so it will always be regenerated
-		fs::last_write_time(FilePath, fs::file_time_type::min());
+		//const auto &emptyTime = fs::file_time_type::min();
+		const auto &emptyTime = fs::last_write_time(config)--; // For some reason, windows hates empty dates???
+		fs::last_write_time(FilePath, emptyTime);
 	}
 }
 

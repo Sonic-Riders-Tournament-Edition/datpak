@@ -115,14 +115,14 @@ int main(int argc, const char *argv[]) {
 		}
 
 		for (auto &archive: archives) {
-			archive.WriteFile();
+			archive.WriteFile(config);
 			if(archive.getWarningCount()){
 				warnings++;
 				generated--;
 			}
 		}
-		makeHeader(result["header"].as<fs::path>());
-	} catch (cxxopts::OptionException &err) {
+		//makeHeader(result["header"].as<fs::path>());
+	} catch (cxxopts::exceptions::exception &err) {
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
 		return 1;
 	} catch (fs::filesystem_error &err) {

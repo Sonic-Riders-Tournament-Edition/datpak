@@ -29,7 +29,7 @@ namespace DatPak {
 		GCAXArchive(const uint16_t &id, fs::path &&filePath, std::unique_ptr <std::map<uint8_t, fs::path>> &&files);
 		~GCAXArchive();
 		const uint_fast8_t& getWarningCount() const;
-		void WriteFile() const;
+		void WriteFile(const fs::path &config) const;
 		[[maybe_unused]] void CompareFile(const fs::path &file) const;
 	};
 
