@@ -1,10 +1,21 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.25)
 project(DatPak CXX)
 
 include_directories(include)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_GLIBCXX_DEBUG")
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
+
+set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP 1)
+# turn on the experimental API
+set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API  "2182bf5c-ef0d-489a-91da-49dbc3090d2a")
+
+string(CONCAT CMAKE_EXPERIMENTAL_CXX_SCANDEP_SOURCE
+		"<CMAKE_CXX_COMPILER> <DEFINES> <INCLUDES> <FLAGS> <SOURCE>"
+		" -MT <DYNDEP_FILE> -MD -MF <DEP_FILE>"
+		" ${flags_to_scan_deps} -fdep-file=<DYNDEP_FILE> -fdep-output=<OBJECT>"
+		)
 
 find_package(fmt REQUIRED)
 find_package(cxxopts REQUIRED)
