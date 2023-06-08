@@ -1,47 +1,49 @@
+#include <fstream>
 #include <memory>
 #include <utility>
 #include <vector>
-#include <fstream>
 
-#include <fmt/core.h>
 #include <fmt/color.h>
+#include <fmt/core.h>
 
 #include "gcaxArchive.hpp"
 #include "include/dsptool.h"
 
 namespace DatPak {
 
+#include "data/EmptySound.inc"
 #include "data/templateDataHeader.inc"
 #include "data/templateDataStruct.inc"
 #include "data/templateMainBody.inc"
-#include "data/EmptySound.inc"
 
-} // DatPak
+} // namespace DatPak
 
-void DatPak::GCAXArchive::WriteFile(const fs::path &config) const {
-	if (Warnings) {
-		fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
-				   fs::absolute(FilePath).string(), spec1, spec2);
-	} else if (verbose >= 0) { // TODO: add a way to display these values some other way
+void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
+	if(Warnings){
+		fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold,
+				   "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
+				   fs::absolute(FilePath).string(), spec1, spec2
+				   );
+	}else if(verbose >= 1){
 		fmt::print("Writing file: {}\n\t0x{:X}, 0x{:X}\n", fs::absolute(FilePath).string(), spec1, spec2);
 	}
 	std::ofstream out(FilePath, std::ios_base::binary | std::ios_base::out);
 	out.write(reinterpret_cast<const char *>(Dat.data()), static_cast<std::streamsize>(Dat.size()));
 	out.close(); // Make sure this is closed for Windows systems
-	if (Warnings) {
+	if(Warnings){
 		// Clear the modified time if there were any issues, so it will always be regenerated
-		//const auto &emptyTime = fs::file_time_type::min();
+		// const auto &emptyTime = fs::file_time_type::min();
 		const auto &emptyTime = fs::last_write_time(config)--; // For some reason, windows hates empty dates???
 		fs::last_write_time(FilePath, emptyTime);
 	}
 }
 
-const uint_fast8_t &DatPak::GCAXArchive::getWarningCount() const {
+const uint_fast8_t &DatPak::GCAXArchive::getWarningCount() const{
 	return Warnings;
 }
 
-void DatPak::GCAXArchive::CompareFile(const fs::path &file) const {
-	if (fs::status(file).type() != fs::file_type::regular) {
+[[maybe_unused]] void DatPak::GCAXArchive::CompareFile(const fs::path &file) const{
+	if(fs::status(file).type() != fs::file_type::regular){
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} does not exist\n", file.string());
 		return;
 	}
@@ -50,60 +52,68 @@ void DatPak::GCAXArchive::CompareFile(const fs::path &file) const {
 	std::vector<uint8_t> compare;
 	auto fileSize = fs::file_size(file);
 	compare.resize(fileSize);
-	compareFile.read(reinterpret_cast<std::ifstream::char_type *>(&compare.front()),
-					 static_cast<std::streamsize>(fileSize));
+	compareFile.read(
+			reinterpret_cast<std::ifstream::char_type *>(&compare.front()),
+			static_cast<std::streamsize>(fileSize)
+			);
 
 	size_t differences = 0;
-	//const int addrWidth = 8, valWidth = 10;
-	for (size_t i = 0; i < fileSize; i++) {
+	// const int addrWidth = 8, valWidth = 10;
+	for(size_t i = 0; i < fileSize; i++){
 		unsigned short val1 = -1, val2 = -1;
-		if (Dat.size() > i) val1 = Dat[i];
-		if (compare.size() > i) val2 = compare[i];
+		if(Dat.size() > i){
+			val1 = Dat[i];
+		}
+		if(compare.size() > i){
+			val2 = compare[i];
+		}
 
-		if (val1 == val2) continue;
-		if (differences == 0) {
+		if(val1 == val2){
+			continue;
+		}
+		if(differences == 0){
 			fmt::print("{:^7}|{:^7}|{:^7}\n", "Address", "Created", "Compare");
 		}
 
 		fmt::print("{:^7X}|{:^7X}|{:^7X}\n", i, val1, val2);
 		differences++;
 	}
-	if (differences == 0) {
+	if(differences == 0){
 		fmt::print("No differences detected.\n");
-	} else {
+	}else{
 		fmt::print("{} differences detected.\n", differences);
 	}
 }
 
 template<>
-void DatPak::PushBytes<std::string>(std::vector<uint8_t> &vector, const std::string &val) {
+void DatPak::PushBytes<std::string>(std::vector<uint8_t> &vector, const std::string &val){
 	vector.insert(vector.end(), val.begin(), val.end());
 }
 
 template<>
-void DatPak::PushBytes<std::string_view>(std::vector<uint8_t> &vector, const std::string_view &val) {
+void DatPak::PushBytes<std::string_view>(std::vector<uint8_t> &vector, const std::string_view &val){
 	vector.insert(vector.end(), val.begin(), val.end());
 }
 
-bool DatPak::verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile) {
+bool DatPak::verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile){
 	wavFile.seekg(0);
 	char buf[4];
 	std::string_view bufStr(buf, 4);
 	wavFile.read(buf, 4);
-	if (bufStr.compare(0, 4, "RIFF")) {
+	if(bufStr.compare(0, 4, "RIFF")){
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. Needs to be encoded in the RIFF format. Replacing with empty file.\n",
-				   wavFilePath.string());
+		           "Invalid WAV file: {}. Needs to be encoded in the RIFF format. Replacing with empty file.\n",
+		           wavFilePath.string());
 		return false;
 	}
 
 	wavFile.seekg(0x8);
 
 	wavFile.read(buf, 4);
-	if (bufStr.compare(0, 4, "WAVE")) {
+	if(bufStr.compare(0, 4, "WAVE")){
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. This is not a .wav file. Replacing with empty file.\n",
-				   wavFilePath.string());
+		           "Invalid WAV file: {}. This is not a .wav file. Replacing with empty file.\n",
+		           wavFilePath.string());
 		return false;
 	}
 
@@ -111,18 +121,18 @@ bool DatPak::verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile
 
 	uint16_t format;
 	wavFile.read(reinterpret_cast<char *>(&format), 2);
-	if (format != 1) {
+	if(format != 1){
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. This is not formatted using PCM. Replacing with empty file.\n",
-				   wavFilePath.string());
+		           "Invalid WAV file: {}. This is not formatted using PCM. Replacing with empty file.\n",
+		           wavFilePath.string());
 		return false;
 	}
 
 	wavFile.read(reinterpret_cast<char *>(&format), 2);
-	if (format != 1) {
+	if(format != 1){
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-				   "Invalid WAV file: {}. This is not formatted as Mono. Replacing with empty file.\n",
-				   wavFilePath.string());
+		           "Invalid WAV file: {}. This is not formatted as Mono. Replacing with empty file.\n",
+		           wavFilePath.string());
 		return false;
 	}
 
@@ -132,37 +142,36 @@ bool DatPak::verifyWavFormat(const fs::path &wavFilePath, std::ifstream &wavFile
 DatPak::GCAXArchive::~GCAXArchive() = default;
 
 DatPak::GCAXArchive::GCAXArchive(
-		const uint16_t &id,
-		fs::path &&filePath,
-		std::unique_ptr<std::map<uint8_t, fs::path>> &&files)
-		: ID(id),
-		  FilePath(std::move(filePath)),
-		  Files(std::move(files)),
-		  Warnings(0) {
-	if (Files->empty())
+		const uint16_t &id, fs::path &&filePath,
+		std::unique_ptr<std::map<uint8_t, fs::path>> &&files
+		) : ID(id), FilePath(std::move(filePath)), Files(std::move(files)),
+		  Warnings(0){
+	if(Files->empty()){
 		throw std::invalid_argument(fmt::format("List of files for archive \"{}\" was empty", FilePath.string()));
+	}
 
 	// First we copy the data template over
-	std::vector<uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
+	std::vector<uint8_t> template_main_body(templateMainBody.begin(),
+	                                        templateMainBody.end());
 	uint8_t file_count = Files->size();
 	uint8_t delta_file_count = file_count - 1;
 
-	// Next we add this archives ID and index of the last file, plus some magic numbers
+	// Next we add this archives ID and index of the last file, plus some magic
+	// numbers
 	PushBytes(template_main_body, swap_endian(ID));
 	PushBytes(template_main_body, swap_endian<uint16_t>(0x08));
 	PushBytes(template_main_body, swap_endian(delta_file_count));
 	PushBytes(template_main_body, std::array<uint8_t, 3>{0});
 
 	// Now add the offsets for each entry in the file table
-	//todo: comment this better
-	for (unsigned int i = 0, sndfile_table_offset = (file_count * 4) + 0xC;
-		 i < file_count;
-		 i++, sndfile_table_offset += 6) {
+	// todo: comment this better
+	for(unsigned int i = 0, sndfile_table_offset = (file_count * 4) + 0xC;
+	    i < file_count; i++, sndfile_table_offset += 6){
 		PushBytes(template_main_body, swap_endian(sndfile_table_offset));
 	}
 
 	// Add more magic numbers and the index for each file?
-	for (uint8_t i = 0; i < file_count; i++) {
+	for(uint8_t i = 0; i < file_count; i++){
 		PushBytes(template_main_body, swap_endian<uint16_t>(0xC0DF));
 		template_main_body.push_back(i);
 		PushBytes(template_main_body, swap_endian<uint16_t>(0x7F80));
@@ -176,7 +185,7 @@ DatPak::GCAXArchive::GCAXArchive(
 	std::vector<uint8_t> audio_info_data(templateDataHeader.begin(), templateDataHeader.end());
 	audio_info_data[0x11] = delta_file_count;
 	// Now copy over the audio info data and assign the index for each file?
-	for (uint8_t i = 0; i < file_count; i++) {
+	for(uint8_t i = 0; i < file_count; i++){
 		std::vector<uint8_t> audio_info_struct(templateDataStruct.begin(), templateDataStruct.end());
 		audio_info_struct[0x0] = i;
 		audio_info_struct[0x3] = i;
@@ -196,26 +205,30 @@ DatPak::GCAXArchive::GCAXArchive(
 	// Go to the last file in our (sorted) map and get the last ID that's specified
 	int maxId = std::prev(Files->end())->first;
 	auto iter = Files->begin();
-	for (int i = 0; i <= maxId; i++) {
+	for(int i = 0; i <= maxId; i++){
 		fs::path &wavFilePath = iter->second;
 		std::ifstream wavFile(wavFilePath, std::ios_base::in | std::ios_base::binary);
 
 		// These both check and make sure we have a valid entry in the map
-		if (Files->count(i) != 0) {
-			if (iter != Files->end()) iter++;
+		if(Files->count(i) != 0){
+			if(iter != Files->end()){
+				iter++;
+			}
 
 			// Check and make sure this wav file is valid, todo: get rid of this goto
-			if (!verifyWavFormat(wavFilePath, wavFile)) goto BadFile;
+			if(!verifyWavFormat(wavFilePath, wavFile)){
+				goto BadFile;
+			}
 
 			uint32_t sample_rate;
 			uint32_t data_length;
 
 			wavFile.read(reinterpret_cast<char *>(&sample_rate), 4);
-			if (sample_rate != 44100) {
+			if(sample_rate != 44100){
 				fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold,
-						   "Warning: File for ID '0x{:02X}' has a sample rate of {}. Game will play this sound at 44100"
-						   " Hz leading to pitch issues\n",
-						   i, sample_rate);
+				           "Warning: File for ID '0x{:02X}' has a sample rate of {}. "
+				           "Game will play this sound at 44100 Hz leading to pitch issues\n",
+				           i, sample_rate);
 				Warnings++;
 			}
 			wavFile.seekg(0x28);
@@ -247,7 +260,7 @@ DatPak::GCAXArchive::GCAXArchive(
 			};
 
 			// There's no way to copy an array during initialization, so we have to do it here
-			for (int x = 0; x < 16; x++) {
+			for(int x = 0; x < 16; x++){
 				fileEntry.coefficient[x] = swap_endian(info.coef[x]);
 			}
 
@@ -284,7 +297,7 @@ DatPak::GCAXArchive::GCAXArchive(
 				.sample_rate = swap_endian<uint16_t>(44100),
 				.data_size = swap_endian(adpcm_byte_count),
 		};
-		for (int x = 0; x < 16; x++) {
+		for(int x = 0; x < 16; x++){
 			fileEntry.coefficient[x] = swap_endian(info.coef[x]);
 		}
 
