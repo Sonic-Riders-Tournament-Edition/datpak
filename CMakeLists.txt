@@ -4,7 +4,7 @@ project(DatPak CXX)
 include_directories(include)
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -D_GLIBCXX_DEBUG")
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 
 find_package(fmt REQUIRED)
 find_package(cxxopts REQUIRED)

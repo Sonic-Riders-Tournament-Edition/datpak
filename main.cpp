@@ -14,8 +14,6 @@
 
 auto archives = std::list<DatPak::GCAXArchive>();
 
-auto datFileInfo = std::vector<HeaderEntry>();
-
 size_t verbose;
 bool force;
 
@@ -27,7 +25,6 @@ int main(int argc, const char *argv[]){
 				       ("v,verbose", "Verbose output") // Implicitly bool
 				       ("f,force", "Force generation")
 				       ("c,config", "Config File path", cxxopts::value<fs::path>()->default_value("config.txt"))
-				       ("h,header", "Generated header output path (Not Currently Functional)", cxxopts::value<fs::path>())
 				       ("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"));
 		options.parse_positional({"config", "output", "_"});
 		auto result = options.parse(argc, argv);
@@ -127,7 +124,6 @@ int main(int argc, const char *argv[]){
 				generated--;
 			}
 		}
-		// makeHeader(result["header"].as<fs::path>());
 	}catch(cxxopts::exceptions::exception &err){
 		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
 		return 1;
@@ -168,40 +164,37 @@ bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 
 	while(config.good()){
 		auto peek = config.peek();
-		while(peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore whitespace and empty newlines
+		if(peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore whitespace and empty newlines
 			config.ignore();
-			peek = config.peek();
+			continue;
 		}
 		if(peek == '#'){
 			config.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
 			continue; // Skip comments
 		}
-		if(config.eof()){
-			break;
-		}
 
-		std::string indexStr, soundPath;
+		std::string indexStr, soundPathStr;
 		config >> std::ws >> indexStr >> std::ws;
-		std::getline(config, soundPath);
+		std::getline(config, soundPathStr);
 
 		if(!config){
 			break;
 		}
 
-		if(soundPath[soundPath.size() - 1] == '\r'){
-			soundPath.erase(soundPath.length() - 1); // Remove carriage return from path if reading a Windows file on linux
+		if(soundPathStr[soundPathStr.size() - 1] == '\r'){
+			soundPathStr.erase(soundPathStr.length() - 1); // Remove carriage return from path if reading a Windows file on linux
 		}
+		soundPathStr = soundPathStr.substr(0, soundPathStr.find('#'));
 
 		uint8_t index = std::stoi(indexStr, nullptr, 0);
-		fs::path sound = parent / soundPath;
+		fs::path sound = parent / soundPathStr;
 		if(!fs::exists(sound)){
 			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} isn't a valid file, skipping\n", sound.string());
 			continue;
 		}
-
 		if(files.count(index)){
 			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-			           "Warning: ID '0x{:02X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPath);
+			           "Warning: ID '0x{:02X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPathStr);
 		}
 
 		if(fs::last_write_time(sound) > fileTime){
@@ -227,18 +220,4 @@ bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 	archives.emplace_back(id, std::move(filePath), std::move(fileMap));
 
 	return true;
-}
-
-void makeHeader(const fs::path &headerPath){
-	if(!exists(headerPath)){
-		throw std::runtime_error(fmt::format("header path {} does not exist", headerPath.string()));
-	}
-
-	auto header = fmt::output_file(headerPath.string());
-
-	header.print("struct DATFile {}[TotalCharacterAmount] = {{\n", headerPath.stem().string());
-	for(auto &entry: datFileInfo){
-		header.print("\t{{\"{}\", 0x{:X}, 0x{:X}, 0x0}},\n", entry.name, entry.spec1, entry.spec2);
-	}
-	header.print("}};\n");
 }
