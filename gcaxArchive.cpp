@@ -1,7 +1,10 @@
+#include <istream>
 #include <fstream>
 #include <memory>
 #include <utility>
 #include <vector>
+#include <span>
+#include <spanstream>
 
 #include <fmt/color.h>
 #include <fmt/core.h>
@@ -12,8 +15,11 @@
 namespace DatPak {
 
 #include "data/EmptySound.inc"
+
 #include "data/templateDataHeader.inc"
+
 #include "data/templateDataStruct.inc"
+
 #include "data/templateMainBody.inc"
 
 } // namespace DatPak
@@ -21,9 +27,9 @@ namespace DatPak {
 void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
 	if(Warnings){
 		fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold,
-				   "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
-				   fs::absolute(FilePath).string(), spec1, spec2
-				   );
+		           "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
+		           fs::absolute(FilePath).string(), spec1, spec2
+		);
 	}else if(verbose >= 1){
 		fmt::print("Writing file: {}\n\t0x{:X}, 0x{:X}\n", fs::absolute(FilePath).string(), spec1, spec2);
 	}
@@ -55,7 +61,7 @@ const uint_fast8_t &DatPak::GCAXArchive::getWarningCount() const{
 	compareFile.read(
 			reinterpret_cast<std::ifstream::char_type *>(&compare.front()),
 			static_cast<std::streamsize>(fileSize)
-			);
+	);
 
 	size_t differences = 0;
 	// const int addrWidth = 8, valWidth = 10;
@@ -144,8 +150,8 @@ DatPak::GCAXArchive::~GCAXArchive() = default;
 DatPak::GCAXArchive::GCAXArchive(
 		const uint16_t &id, fs::path &&filePath,
 		std::unique_ptr<std::map<uint8_t, fs::path>> &&files
-		) : ID(id), FilePath(std::move(filePath)), Files(std::move(files)),
-		  Warnings(0){
+) : ID(id), FilePath(std::move(filePath)), Files(std::move(files)),
+    Warnings(0){
 	if(Files->empty()){
 		throw std::invalid_argument(fmt::format("List of files for archive \"{}\" was empty", FilePath.string()));
 	}
@@ -207,86 +213,59 @@ DatPak::GCAXArchive::GCAXArchive(
 	auto iter = Files->begin();
 	for(int i = 0; i <= maxId; i++){
 		fs::path &wavFilePath = iter->second;
-		std::ifstream wavFile(wavFilePath, std::ios_base::in | std::ios_base::binary);
+		std::unique_ptr<std::basic_istream<char>> wavFile = std::make_unique<std::ifstream>(wavFilePath, std::ios_base::in | std::ios_base::binary);
 
-		// These both check and make sure we have a valid entry in the map
-		if(Files->count(i) != 0){
-			if(iter != Files->end()){
-				iter++;
-			}
+		{
+			bool emptyFile = Files->count(i) == 0;
 
-			// Check and make sure this wav file is valid, todo: get rid of this goto
-			if(!verifyWavFormat(wavFilePath, wavFile)){
-				goto BadFile;
-			}
-
-			uint32_t sample_rate;
-			uint32_t data_length;
-
-			wavFile.read(reinterpret_cast<char *>(&sample_rate), 4);
-			if(sample_rate != 44100){
+			// Check and make sure this wav file is valid
+			if(emptyFile){
 				fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold,
-				           "Warning: File for ID '0x{:02X}' has a sample rate of {}. "
-				           "Game will play this sound at 44100 Hz leading to pitch issues\n",
-				           i, sample_rate);
+				           "Warning: File for ID '0x{:02X}' is empty, Replacing with empty file\n", i);
+
+			} else {
+				// Check and make sure we have a valid entry in the map
+				if(iter != Files->end()){
+					iter++;
+				}
+			}
+			if(emptyFile || !verifyWavFormat(wavFilePath, *dynamic_cast<std::ifstream *>(wavFile.get()))){
+				// Replace the invalid wav file with an empty one
+				std::span<const char> emptySpan = EmptySound;
+				wavFile = std::make_unique<std::ispanstream>(emptySpan);
 				Warnings++;
 			}
-			wavFile.seekg(0x28);
-			wavFile.read(reinterpret_cast<char *>(&data_length), 4);
-
-			// Make this a unique pointer, so it will always free itself when out of scope
-			std::unique_ptr<int16_t[]> inWav(new int16_t[data_length]);
-			wavFile.read(reinterpret_cast<char *>(inWav.get()), data_length);
-
-			// Samples are stored as signed 16-bit, so the sample count is half of the available data
-			uint32_t sample_count = data_length / 2;
-			uint32_t adpcm_byte_count = getBytesForAdpcmBuffer(sample_count);
-
-			std::unique_ptr<uint8_t[]> outPCM(new uint8_t[adpcm_byte_count]);
-			ADPCMINFO info;
-
-			// Encode our wav data into ADPCM
-			encode(inWav.get(), outPCM.get(), &info, sample_count);
-
-			FileEntry fileEntry{
-					.start_offset = swap_endian<uint32_t>(audio_data.size()),
-					.unk = swap_endian(2),
-					.shifted_size = swap_endian((adpcm_byte_count << 1) - 1),
-					.coefficient{},
-					.unk2 = {0, 0, 0},
-					.unk3 = swap_endian(0x200),
-					.sample_rate = swap_endian<uint16_t>(sample_rate),
-					.data_size = swap_endian(adpcm_byte_count)
-			};
-
-			// There's no way to copy an array during initialization, so we have to do it here
-			for(int x = 0; x < 16; x++){
-				fileEntry.coefficient[x] = swap_endian(info.coef[x]);
-			}
-
-			// Add our file entry header data
-			PushBytes(file_entry_data, fileEntry);
-
-			// now the audio data itself
-			audio_data.insert(audio_data.end(), outPCM.get(), outPCM.get() + adpcm_byte_count);
-
-			// Now we align to an 8-bit boundary
-			alignContainer<8>(audio_data);
-
-			// Now continue looping
-			continue;
 		}
-		fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold,
-				   "Warning: File for ID '0x{:02X}' is empty, Replacing with empty file\n", i);
-		BadFile:
 
-		// If we run into an error with the file, or if this entry has no file, use empty data
-		int16_t sample_data[] = {1, 0};
-		uint32_t sample_count = 2;
+		uint32_t sample_rate;
+		uint32_t data_length;
+
+		wavFile->seekg(0x18);
+
+		wavFile->read(reinterpret_cast<char *>(&sample_rate), sizeof(sample_rate));
+		if(sample_rate != 44100){
+			fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold,
+			           "Warning: File for ID '0x{:02X}' has a sample rate of {}. "
+			           "Game will play this sound at 44100 Hz leading to pitch issues\n",
+			           i, sample_rate);
+			Warnings++;
+		}
+		wavFile->seekg(0x28);
+		wavFile->read(reinterpret_cast<char *>(&data_length), sizeof(data_length));
+
+		std::vector<int16_t> inWav; inWav.resize(data_length);
+		wavFile->read(reinterpret_cast<char *>(inWav.data()), data_length);
+
+		// Samples are stored as signed 16-bit, so the sample count is half of the available data
+		uint32_t sample_count = data_length / 2;
 		uint32_t adpcm_byte_count = getBytesForAdpcmBuffer(sample_count);
-		std::unique_ptr<uint8_t[]> outPCM(new uint8_t[adpcm_byte_count]);
+
+		std::vector<uint8_t> outPCM; outPCM.resize(adpcm_byte_count);
 		ADPCMINFO info;
-		encode(sample_data, outPCM.get(), &info, sample_count);
+
+		// Encode our wav data into ADPCM
+		encode(inWav.data(), outPCM.data(), &info, sample_count);
+
 		FileEntry fileEntry{
 				.start_offset = swap_endian<uint32_t>(audio_data.size()),
 				.unk = swap_endian(2),
@@ -294,9 +273,11 @@ DatPak::GCAXArchive::GCAXArchive(
 				.coefficient{},
 				.unk2 = {0, 0, 0},
 				.unk3 = swap_endian(0x200),
-				.sample_rate = swap_endian<uint16_t>(44100),
-				.data_size = swap_endian(adpcm_byte_count),
+				.sample_rate = swap_endian<uint16_t>(sample_rate),
+				.data_size = swap_endian(adpcm_byte_count)
 		};
+
+		// There's no way to copy an array during initialization, so we have to do it here
 		for(int x = 0; x < 16; x++){
 			fileEntry.coefficient[x] = swap_endian(info.coef[x]);
 		}
@@ -304,12 +285,13 @@ DatPak::GCAXArchive::GCAXArchive(
 		// Add our file entry header data
 		PushBytes(file_entry_data, fileEntry);
 
-		// now the empty audio data
-		audio_data.insert(audio_data.end(), outPCM.get(), outPCM.get() + adpcm_byte_count);
+		// now the audio data itself
+		audio_data.insert(audio_data.end(), outPCM.begin(), outPCM.end());
 
 		// Now we align to an 8-bit boundary
 		alignContainer<8>(audio_data);
-		Warnings++;
+
+		// Now continue looping
 	}
 
 	// This time we align to a 32-bit boundary
