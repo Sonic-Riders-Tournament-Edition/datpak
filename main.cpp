@@ -1,24 +1,36 @@
 #include <fstream>
 #include <list>
 #include <map>
+#include <thread>
 
 #include <fmt/color.h>
 #include <fmt/core.h>
-#include <fmt/os.h>
 
 #include <cxxopts.hpp>
 
-// #include <cassert>
-
 #include "main.hpp"
-
-auto archives = std::list<DatPak::GCAXArchive>();
-
-size_t verbose;
-bool force;
+#include "state.hpp"
 
 int main(int argc, const char *argv[]){
-	uint_fast8_t errors = 0, warnings = 0, generated = 0, skipped = 0;
+	using std::chrono::high_resolution_clock;
+	using std::chrono::duration_cast;
+	using std::chrono::duration;
+	using std::chrono::milliseconds;
+
+	const auto t1 = high_resolution_clock::now();
+	const auto returnValue = processInput({argv, static_cast<size_t>(argc)});
+	const auto t2 = high_resolution_clock::now();
+
+	/* Getting number of milliseconds as a double. */
+	const duration<double, std::milli> ms_double = t2 - t1;
+
+	fmt::print("\n{}ms\n", ms_double.count());
+	return returnValue;
+}
+
+int processInput(std::span<const char*> args) noexcept{
+	State currentState;
+	auto &[archives, result, printLock, errors, warnings, generated, skipped] = currentState;
 	try{
 		cxxopts::Options options("DatPak", "Creates GCAX sound archives to be used by Sonic Riders");
 		options.add_options()
@@ -27,13 +39,10 @@ int main(int argc, const char *argv[]){
 				       ("c,config", "Config File path", cxxopts::value<fs::path>()->default_value("config.txt"))
 				       ("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"));
 		options.parse_positional({"config", "output", "_"});
-		auto result = options.parse(argc, argv);
+		result = options.parse(args.size(), args.data());
 
-		verbose = result["verbose"].count();
-		force = static_cast<bool>(result["force"].count());
-
-		fs::path config = result["config"].as<fs::path>();
-		fs::path output = result["output"].as<fs::path>();
+		fs::path config = currentState.config();
+		const fs::path &output = currentState.output();
 
 		fs::path configParent;
 		if(fs::is_directory(config)){
@@ -43,118 +52,130 @@ int main(int argc, const char *argv[]){
 			configParent = config.parent_path();
 		}
 
-		if(verbose > 0){
+		if(currentState.verbose() > 0){
+			const std::scoped_lock writeLock{printLock};
 			fmt::print("Loaded config {}, outputting to {}\n", config.string(), output.string());
 		}
 
-		fs::create_directory(output); // Create directory if it doesn't exist
+		fs::create_directory(output); // Create output directory if it doesn't exist
 
-		std::ifstream input(config);
-
-		if(!input){
-			throw std::runtime_error("Main config file stream failed to open");
-		}
-
-		while(input.good()){
-			auto peek = input.peek();
-			while(peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore whitespace and empty newlines
-				input.ignore();
-				peek = input.peek();
-			}
-			if(peek == '#'){
-				input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
-				if(verbose > 1){
-					fmt::print("Skipping comment, going to next line\n");
-				}
-				continue; // Skip comments
-			}
-
-			fs::path bankConf;
-			std::string idStr;
-			input >> std::ws >> bankConf >> idStr;
-
-			if(input.fail()){
-				break;
-			}
-			if(bankConf.is_relative()){
-				bankConf = configParent / bankConf;
-			}
-
-			auto id = static_cast<uint16_t>(std::stoi(idStr, nullptr, 0));
-			// assert(id != 0);
-
-			try{
-				if(fs::is_directory(bankConf)){
-					bankConf.append("config.txt");
-				}
-
-				if(!fs::exists(bankConf)){
-					throw std::runtime_error(fmt::format("config file {} does not exist", bankConf.string()));
-				}
-
-				fs::path bankDir = bankConf.parent_path();
-
-				input.clear();
-
-				std::string outputFilePath = bankDir.filename().string();
-				int ret = input.peek();
-				if(ret != '\n' && ret != '\r' && ret != ' '){
-					input >> outputFilePath;
-				}
-
-				outputFilePath += ".DAT";
-
-				if(processVoiceFiles(bankDir, bankConf, id, output / outputFilePath)){
-					generated++;
-				}else{
-					skipped++;
-				}
-			}catch(std::exception &err){
-				fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
-				errors++;
-			}
-
-			input.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
-		}
+		processMainConfigFile(currentState, config, configParent);
 
 		for(auto &archive: archives){
-			archive.WriteFile(config);
-			if(archive.getWarningCount()){
+			archive.WriteFile(currentState, config);
+			if(archive.getWarningCount() != 0u){
 				warnings++;
 				generated--;
 			}
 		}
 	}catch(cxxopts::exceptions::exception &err){
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+		const std::scoped_lock writeLock{printLock};
+		fmt::print(errorColors, "{}\n", err.what());
 		return 1;
 	}catch(fs::filesystem_error &err){
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+		const std::scoped_lock writeLock{printLock};
+		fmt::print(errorColors, "{}\n", err.what());
 		return 2;
 	}catch(std::exception &err){
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{}\n", err.what());
+		const std::scoped_lock writeLock{printLock};
+		fmt::print(errorColors, "{}\n", err.what());
 		return -1;
 	}
-	if(errors){
-		fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "\nFailed to generate {} files\n", errors);
+	const std::scoped_lock writeLock{printLock};
+	if(errors != 0u){
+		fmt::print(errorColors, "\nFailed to generate {} files\n", errors.load());
 	}
-	if(warnings){
-		fmt::print(fg(fmt::color::yellow) | fmt::emphasis::bold, "\nGenerated {} files with issues\n", warnings);
+	if(warnings != 0u){
+		fmt::print(warningColors, "\nGenerated {} files with issues\n", warnings.load());
 	}
-	if(verbose > 0){
-		if(skipped){
-			fmt::print(fg(fmt::color::green), "{} files were unmodified\n", skipped);
+	if(currentState.verbose() > 0){
+		if(skipped != 0u){
+			fmt::print(okColors, "{} files were unmodified\n", skipped.load());
 		}
-		if(generated){
-			fmt::print(fg(fmt::color::green), "Successfully generated {} files\n", generated);
+		if(generated != 0u){
+			fmt::print(okColors, "Successfully generated {} files\n", generated.load());
 		}
 	}
+	return 0;
 }
 
-bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const uint16_t &id, fs::path filePath){
-	std::error_code ec;
-	fs::file_time_type fileTime = fs::last_write_time(filePath, ec);
-	bool modified = force;
-	if(ec){
+void processMainConfigFile(State &state, const fs::path &config, const fs::path &configParent){
+	std::ifstream mainConfigFile(config);
+
+	if(!mainConfigFile){
+		throw std::runtime_error("Main config file stream failed to open");
+	}
+
+	std::vector<std::jthread> threads;
+
+	while(mainConfigFile.good()){
+		auto peek = mainConfigFile.peek();
+		while(peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore space and empty newlines
+			mainConfigFile.ignore();
+			peek = mainConfigFile.peek();
+		}
+		if(peek == '#'){
+			mainConfigFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to the next line
+			if(state.verbose() > 1){
+				const std::scoped_lock writeLock{state.printLock};
+				fmt::print("Skipping comment, going to next line\n");
+			}
+			continue; // Skip comments
+		}
+
+		fs::path bankConf;
+		std::string idStr;
+		mainConfigFile >> std::ws >> bankConf >> idStr;
+
+		if(mainConfigFile.fail()){
+			break;
+		}
+		if(bankConf.is_relative()){
+			bankConf = configParent / bankConf;
+		}
+
+		auto datID = static_cast<uint16_t>(std::stoi(idStr, nullptr, 0));
+		// assert(id != 0);
+
+		try{
+			if(fs::is_directory(bankConf)){
+				bankConf.append("config.txt");
+			}
+
+			if(!fs::exists(bankConf)){
+				throw std::runtime_error(fmt::format("config file {} does not exist", bankConf.string()));
+			}
+
+			const auto bankDir = bankConf.parent_path();
+
+			mainConfigFile.clear();
+
+			std::string outputFilePath = bankDir.filename().string();
+			const auto ret = mainConfigFile.peek();
+			if(ret != '\n' && ret != '\r' && ret != ' '){
+				mainConfigFile >> outputFilePath;
+			}
+
+			outputFilePath += ".DAT";
+
+			threads.emplace_back(processVoiceFiles, std::ref(state), bankDir, bankConf, datID, state.output() / outputFilePath);
+		}catch(std::exception &err){
+			const std::scoped_lock writeLock{state.printLock};
+			fmt::print(errorColors, "{}\n", err.what());
+			state.errors++;
+		}
+
+		mainConfigFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to the next line
+	}
+
+	// threads destructor calls jthread destructor which joins so no manual joining needed
+}
+
+void processVoiceFiles(State &state, const fs::path &parent, const fs::path &configFile, const uint16_t &datID, fs::path filePath){
+	std::error_code errorCode;
+	const fs::file_time_type fileTime = fs::last_write_time(filePath, errorCode);
+	bool modified = state.force();
+	if(errorCode){
 		modified = true;
 	}
 	std::ifstream config = std::ifstream(configFile);
@@ -164,16 +185,17 @@ bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 
 	while(config.good()){
 		auto peek = config.peek();
-		if(peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore whitespace and empty newlines
+		if(peek == '\r' || peek == '\n' || peek == ' ' || peek == '\t'){ // ignore space and empty newlines
 			config.ignore();
 			continue;
 		}
 		if(peek == '#'){
-			config.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to next line
+			config.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to the next line
 			continue; // Skip comments
 		}
 
-		std::string indexStr, soundPathStr;
+		std::string indexStr;
+		std::string soundPathStr;
 		config >> std::ws >> indexStr >> std::ws;
 		std::getline(config, soundPathStr);
 
@@ -182,19 +204,21 @@ bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 		}
 
 		if(soundPathStr[soundPathStr.size() - 1] == '\r'){
-			soundPathStr.erase(soundPathStr.length() - 1); // Remove carriage return from path if reading a Windows file on linux
+			soundPathStr.erase(soundPathStr.length() - 1); // Remove a carriage return from the path if reading a Windows file on linux
 		}
 		soundPathStr = soundPathStr.substr(0, soundPathStr.find('#'));
 
-		uint8_t index = std::stoi(indexStr, nullptr, 0);
-		fs::path sound = parent / soundPathStr;
+		const uint8_t index = std::stoi(indexStr, nullptr, 0);
+		const fs::path sound = parent / soundPathStr;
 		if(!fs::exists(sound)){
-			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold, "{} isn't a valid file, skipping\n", sound.string());
+			const std::scoped_lock writeLock{state.printLock};
+			fmt::print(errorColors, "{} isn't a valid file, skipping\n", sound.string());
 			continue;
 		}
-		if(files.count(index)){
-			fmt::print(fg(fmt::color::crimson) | fmt::emphasis::bold,
-			           "Warning: ID '0x{:02X}' is replacing '{}' with '{}'\n", +index, files[index].string(), soundPathStr);
+		if(files.contains(index)){
+			const std::scoped_lock writeLock{state.printLock};
+			fmt::print(errorColors, "Warning: ID '0x{:02X}' is replacing '{}' with '{}'\n",
+			           +index, files[index].string(), soundPathStr);
 		}
 
 		if(fs::last_write_time(sound) > fileTime){
@@ -206,18 +230,19 @@ bool processVoiceFiles(const fs::path &parent, const fs::path &configFile, const
 	}
 
 	if(!modified){
-		return false;
+		state.skipped++;
+		return;
 	}
 
-	if(verbose > 0){
+	if(state.verbose() > 0){
+		const std::scoped_lock writeLock{state.printLock};
 		fmt::print("Files from '{}': \n", configFile.string());
-		for(auto iter = files.begin(); iter != files.end(); iter++){
-			fmt::print("\t0x{0:02X} ({0:}): {1:}\n", +iter->first,
-			           iter->second.filename().string());
+		for(auto &file: files){
+			fmt::print("\t0x{0:02X} ({0:}): {1:}\n", +file.first, file.second.filename().string());
 		}
 	}
 
-	archives.emplace_back(id, std::move(filePath), std::move(fileMap));
+	state.archives.emplace_back(state.printLock, datID, std::move(filePath), std::move(fileMap));
 
-	return true;
+	state.generated++;
 }
