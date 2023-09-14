@@ -28,45 +28,66 @@ int main(int argc, const char *argv[]){
 	return returnValue;
 }
 
+ProgramState programState; // NOLINT(*-avoid-non-const-global-variables)
+
 int processInput(std::span<const char*> args) noexcept{
-	State currentState;
-	auto &[archives, result, printLock, errors, warnings, generated, skipped] = currentState;
+	auto &[result, printLock] = programState;
+	std::atomic<uint_fast8_t> errors = 0;
+	std::atomic<uint_fast8_t> warnings = 0;
+	std::atomic<uint_fast8_t> generated = 0;
+	std::atomic<uint_fast8_t> skipped = 0;
 	try{
 		cxxopts::Options options("DatPak", "Creates GCAX sound archives to be used by Sonic Riders");
 		options.add_options()
 				       ("v,verbose", "Verbose output") // Implicitly bool
 				       ("f,force", "Force generation")
-				       ("c,config", "Config File path", cxxopts::value<fs::path>()->default_value("config.txt"))
+				       ("c,config", "Config File path", cxxopts::value<std::vector<fs::path>>()->default_value({"config.txt"}))
 				       ("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"));
-		options.parse_positional({"config", "output", "_"});
+		options.parse_positional({"config"});
 		result = options.parse(args.size(), args.data());
 
-		fs::path config = currentState.config();
-		const fs::path &output = currentState.output();
 
-		fs::path configParent;
-		if(fs::is_directory(config)){
-			configParent = config;
-			config.append("config.txt");
-		}else{
-			configParent = config.parent_path();
-		}
-
-		if(currentState.verbose() > 0){
-			const std::scoped_lock writeLock{printLock};
-			fmt::print("Loaded config {}, outputting to {}\n", config.string(), output.string());
-		}
+		std::vector<fs::path> configs = programState.config();
+		const fs::path &output = programState.output();
 
 		fs::create_directory(output); // Create output directory if it doesn't exist
 
-		processMainConfigFile(currentState, config, configParent);
+		std::vector<fs::path> configParents(configs.size());
+		std::vector<ConfigState> configStates(configs.size());
 
-		for(auto &archive: archives){
-			archive.WriteFile(currentState, config);
-			if(archive.getWarningCount() != 0u){
-				warnings++;
-				generated--;
-			}
+		std::vector<std::jthread> threads;
+
+		for(size_t i = 0; i < configs.size(); i++){
+			threads.emplace_back([&, i](){
+				auto &configState = configStates[i];
+				fs::path &config = configs[i];
+				fs::path &configParent = configParents[i];
+				if(fs::is_directory(config)){
+					configParent = config;
+					config.append("config.txt");
+				}else{
+					configParent = config.parent_path();
+				}
+
+				if(programState.verbose() > 0){
+					const std::scoped_lock writeLock{printLock};
+					fmt::print("Loaded config {}, outputting to {}\n", config.string(), output.string());
+				}
+
+				processMainConfigFile(configState, config, configParent);
+
+				for(const auto &archive: configState.archives){
+					archive.WriteFile(config);
+					if(archive.getWarningCount() != 0u){
+						configState.warnings++;
+						configState.generated--;
+					}
+				}
+				errors += configState.errors;
+				warnings += configState.warnings;
+				generated += configState.generated;
+				skipped += configState.skipped;
+			});
 		}
 	}catch(cxxopts::exceptions::exception &err){
 		const std::scoped_lock writeLock{printLock};
@@ -88,7 +109,7 @@ int processInput(std::span<const char*> args) noexcept{
 	if(warnings != 0u){
 		fmt::print(warningColors, "\nGenerated {} files with issues\n", warnings.load());
 	}
-	if(currentState.verbose() > 0){
+	if(programState.verbose() > 0){
 		if(skipped != 0u){
 			fmt::print(okColors, "{} files were unmodified\n", skipped.load());
 		}
@@ -99,7 +120,7 @@ int processInput(std::span<const char*> args) noexcept{
 	return 0;
 }
 
-void processMainConfigFile(State &state, const fs::path &config, const fs::path &configParent){
+void processMainConfigFile(ConfigState &state, const fs::path &config, const fs::path &configParent){
 	std::ifstream mainConfigFile(config);
 
 	if(!mainConfigFile){
@@ -116,8 +137,8 @@ void processMainConfigFile(State &state, const fs::path &config, const fs::path 
 		}
 		if(peek == '#'){
 			mainConfigFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to the next line
-			if(state.verbose() > 1){
-				const std::scoped_lock writeLock{state.printLock};
+			if(programState.verbose() > 1){
+				const std::scoped_lock writeLock{programState.printLock};
 				fmt::print("Skipping comment, going to next line\n");
 			}
 			continue; // Skip comments
@@ -158,9 +179,9 @@ void processMainConfigFile(State &state, const fs::path &config, const fs::path 
 
 			outputFilePath += ".DAT";
 
-			threads.emplace_back(processVoiceFiles, std::ref(state), bankDir, bankConf, datID, state.output() / outputFilePath);
+			threads.emplace_back(processVoiceFiles, std::ref(state), bankDir, bankConf, datID, programState.output() / outputFilePath);
 		}catch(std::exception &err){
-			const std::scoped_lock writeLock{state.printLock};
+			const std::scoped_lock writeLock{programState.printLock};
 			fmt::print(errorColors, "{}\n", err.what());
 			state.errors++;
 		}
@@ -171,10 +192,10 @@ void processMainConfigFile(State &state, const fs::path &config, const fs::path 
 	// threads destructor calls jthread destructor which joins so no manual joining needed
 }
 
-void processVoiceFiles(State &state, const fs::path &parent, const fs::path &configFile, const uint16_t &datID, fs::path filePath){
+void processVoiceFiles(ConfigState &state, const fs::path &parent, const fs::path &configFile, const uint16_t &datID, fs::path filePath){
 	std::error_code errorCode;
 	const fs::file_time_type fileTime = fs::last_write_time(filePath, errorCode);
-	bool modified = state.force();
+	bool modified = programState.force();
 	if(errorCode){
 		modified = true;
 	}
@@ -211,12 +232,12 @@ void processVoiceFiles(State &state, const fs::path &parent, const fs::path &con
 		const uint8_t index = std::stoi(indexStr, nullptr, 0);
 		const fs::path sound = parent / soundPathStr;
 		if(!fs::exists(sound)){
-			const std::scoped_lock writeLock{state.printLock};
+			const std::scoped_lock writeLock{programState.printLock};
 			fmt::print(errorColors, "{} isn't a valid file, skipping\n", sound.string());
 			continue;
 		}
 		if(files.contains(index)){
-			const std::scoped_lock writeLock{state.printLock};
+			const std::scoped_lock writeLock{programState.printLock};
 			fmt::print(errorColors, "Warning: ID '0x{:02X}' is replacing '{}' with '{}'\n",
 			           +index, files[index].string(), soundPathStr);
 		}
@@ -234,15 +255,15 @@ void processVoiceFiles(State &state, const fs::path &parent, const fs::path &con
 		return;
 	}
 
-	if(state.verbose() > 0){
-		const std::scoped_lock writeLock{state.printLock};
+	if(programState.verbose() > 0){
+		const std::scoped_lock writeLock{programState.printLock};
 		fmt::print("Files from '{}': \n", configFile.string());
 		for(auto &file: files){
 			fmt::print("\t0x{0:02X} ({0:}): {1:}\n", +file.first, file.second.filename().string());
 		}
 	}
 
-	state.archives.emplace_back(state.printLock, datID, std::move(filePath), std::move(fileMap));
+	state.archives.emplace_back(programState.printLock, datID, std::move(filePath), std::move(fileMap));
 
 	state.generated++;
 }

@@ -26,15 +26,15 @@ namespace DatPak {
 
 } // namespace DatPak
 
-void DatPak::GCAXArchive::WriteFile(const State &state, const fs::path &config) const{
+void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
 	if(Warnings != 0u){
-		const std::scoped_lock writeLock{state.printLock};
+		const std::scoped_lock writeLock{programState.printLock};
 		fmt::print(warningColors,
 		           "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
 		           fs::absolute(FilePath).string(), spec1, spec2
 		);
-	}else if(state.verbose() >= 1){
-		const std::scoped_lock writeLock{state.printLock};
+	}else if(programState.verbose() >= 1){
+		const std::scoped_lock writeLock{programState.printLock};
 		fmt::print("Writing file: {}\n\t0x{:X}, 0x{:X}\n", fs::absolute(FilePath).string(), spec1, spec2);
 	}
 	std::basic_ofstream<std::byte> out(FilePath, std::ios_base::binary | std::ios_base::out);

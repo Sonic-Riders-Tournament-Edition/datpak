@@ -18,7 +18,7 @@ constexpr auto okColors = fg(fmt::color::green);
 
 namespace fs = std::filesystem;
 
-struct State;
+struct ConfigState;
 
 namespace DatPak {
 	class GCAXArchive{
@@ -35,7 +35,7 @@ namespace DatPak {
 
 		[[nodiscard]] const uint_fast8_t &getWarningCount() const;
 
-		void WriteFile(const State &state, const fs::path &config) const;
+		void WriteFile(const fs::path &config) const;
 
 		[[maybe_unused]] void CompareFile(std::mutex &printLock, const fs::path &file) const;
 	};

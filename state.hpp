@@ -9,16 +9,10 @@
 
 namespace fs = std::filesystem;
 
-struct State{
-	std::list<DatPak::GCAXArchive> archives = std::list<DatPak::GCAXArchive>();
+struct ProgramState{
 	cxxopts::ParseResult result;
 
 	mutable std::mutex printLock;
-
-	std::atomic<uint_fast8_t> errors = 0;
-	[[maybe_unused]] std::atomic<uint_fast8_t> warnings = 0;
-	std::atomic<uint_fast8_t> generated = 0;
-	std::atomic<uint_fast8_t> skipped = 0;
 
 	[[nodiscard]] inline auto verbose() const noexcept{
 		return result["verbose"].count();
@@ -29,10 +23,21 @@ struct State{
 	}
 
 	[[nodiscard]] inline const auto& config() const{
-		return result["config"].as<fs::path>();
+		return result["config"].as<std::vector<fs::path>>();
 	}
 
 	[[nodiscard]] inline const auto& output() const{
 		return result["output"].as<fs::path>();
 	}
+};
+
+extern ProgramState programState; // NOLINT(*-avoid-non-const-global-variables)
+
+struct ConfigState{
+	std::list<DatPak::GCAXArchive> archives = std::list<DatPak::GCAXArchive>();
+
+	std::atomic<uint_fast8_t> errors = 0;
+	[[maybe_unused]] std::atomic<uint_fast8_t> warnings = 0;
+	std::atomic<uint_fast8_t> generated = 0;
+	std::atomic<uint_fast8_t> skipped = 0;
 };
