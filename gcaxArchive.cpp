@@ -27,7 +27,8 @@ namespace DatPak {
 } // namespace DatPak
 
 void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
-	if(Warnings != 0u){
+	auto warnings = Warnings;
+	if(warnings != 0u){
 		const std::scoped_lock writeLock{programState.printLock};
 		fmt::print(warningColors,
 		           "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
@@ -37,11 +38,19 @@ void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
 		const std::scoped_lock writeLock{programState.printLock};
 		fmt::print("Writing file: {}\n\t0x{:X}, 0x{:X}\n", fs::absolute(FilePath).string(), spec1, spec2);
 	}
-	std::basic_ofstream<std::byte> out(FilePath, std::ios_base::binary | std::ios_base::out);
-	const std::span datBytes = as_bytes(std::span(Dat));
-	out.write(datBytes.data(), static_cast<std::streamsize>(datBytes.size()));
-	out.close(); // Make sure this is closed for Windows systems
-	if(Warnings != 0u){
+	try{
+		using output_stream = std::ofstream;
+		output_stream out(FilePath, std::ios_base::binary | std::ios_base::out);
+		out.exceptions(output_stream::badbit | output_stream::failbit);
+		out.write(reinterpret_cast<const char *>(Dat.data()), static_cast<std::streamsize>(Dat.size())); //NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+	}catch(std::ios_base::failure &e){
+		fmt::print(errorColors, "Error writing file: {}", e.what());
+		warnings++;
+	}catch(...){
+		fmt::print(errorColors, "Unknown error writing file {}\n", fs::absolute(FilePath).string());
+		warnings++;
+	}
+	if(warnings != 0u){
 		// Clear the modified time if there were any issues, so it will always be regenerated
 		// const auto &emptyTime = fs::file_time_type::min();
 		const auto &emptyTime = fs::last_write_time(config)--; // For some reason, windows hates empty dates???

@@ -52,16 +52,12 @@ int processInput(std::span<const char*> args) noexcept{
 
 		fs::create_directory(output); // Create output directory if it doesn't exist
 
-		std::vector<fs::path> configParents(configs.size());
-		std::vector<ConfigState> configStates(configs.size());
-
 		std::vector<std::jthread> threads;
 
-		for(size_t i = 0; i < configs.size(); i++){
-			threads.emplace_back([&, i](){
-				auto &configState = configStates[i];
-				fs::path &config = configs[i];
-				fs::path &configParent = configParents[i];
+		for(auto &config : configs){
+			threads.emplace_back([&](){
+				ConfigState configState;
+				fs::path configParent;
 				if(fs::is_directory(config)){
 					configParent = config;
 					config.append("config.txt");
