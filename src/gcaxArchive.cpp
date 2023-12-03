@@ -16,13 +16,13 @@
 
 namespace DatPak {
 
-#include "data/EmptySound.inc"
+#include "EmptySound.inc"
 
-#include "data/templateDataHeader.inc"
+#include "templateDataHeader.inc"
 
-#include "data/templateDataStruct.inc"
+#include "templateDataStruct.inc"
 
-#include "data/templateMainBody.inc"
+#include "templateMainBody.inc"
 
 } // namespace DatPak
 

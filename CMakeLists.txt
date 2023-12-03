@@ -65,10 +65,8 @@ else ()
 	message(WARNING "CMake flags for compiler aren't set for compiler ${CMAKE_CXX_COMPILER_ID}")
 endif ()
 
-add_executable(DatPak)
-target_sources(DatPak
-		PRIVATE main.cpp gcaxArchive.cpp
-)
+add_executable(DatPak src/main.cpp src/gcaxArchive.cpp)
+target_include_directories(DatPak PUBLIC data)
 target_compile_options(DatPak PUBLIC ${WARNING_FLAGS})
 target_link_libraries(DatPak PUBLIC DspTool::DspTool fmt::fmt-header-only cxxopts::cxxopts gcem)
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")

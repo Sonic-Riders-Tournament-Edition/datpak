@@ -1,3 +1,8 @@
+### VCPKG
+/vcpkg
+/builds
+/build
+
 ### C++ template
 # Prerequisites
 *.d
