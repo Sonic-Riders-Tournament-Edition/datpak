@@ -1,17 +1,17 @@
-#include <istream>
+#include <chrono>
+#include <dsptool.h>
 #include <fstream>
+#include <istream>
+#include <limits>
 #include <memory>
-#include <utility>
-#include <vector>
 #include <span>
 #include <spanstream>
-#include <limits>
-
+#include <utility>
+#include <vector>
 #include <fmt/color.h>
 #include <fmt/core.h>
 
 #include "gcaxArchive.hpp"
-#include "include/dsptool.h"
 #include "state.hpp"
 
 namespace DatPak {
@@ -26,7 +26,7 @@ namespace DatPak {
 
 } // namespace DatPak
 
-void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
+void DatPak::GCAXArchive::WriteFile([[maybe_unused]] const fs::path &config) const{
 	auto warnings = Warnings;
 	if(warnings != 0u){
 		const std::scoped_lock writeLock{programState.printLock};
@@ -51,15 +51,25 @@ void DatPak::GCAXArchive::WriteFile(const fs::path &config) const{
 		warnings++;
 	}
 	if(warnings != 0u){
+		using namespace std::chrono;
 		// Clear the modified time if there were any issues, so it will always be regenerated
-		// const auto &emptyTime = fs::file_time_type::min();
-		const auto &emptyTime = fs::last_write_time(config)--; // For some reason, windows hates empty dates???
+#ifndef _WIN32
+		constexpr auto emptyTime = fs::file_time_type::min();
+#else
+		const auto emptyTime = --fs::last_write_time(config); // For some reason, windows hates empty dates???
+#endif
+		//constexpr std::chrono::year_month_day earliestTime{January/1/1980};
+		//constexpr fs::file_time_type emptyTime = time_point_cast<fs::file_time_type::duration>(std::chrono::sys_days{earliestTime});
 		fs::last_write_time(FilePath, emptyTime);
 	}
 }
 
 const uint_fast8_t &DatPak::GCAXArchive::getWarningCount() const{
 	return Warnings;
+}
+
+void DatPak::GCAXArchive::incrementWarning(){
+	Warnings++;
 }
 
 [[maybe_unused]] void DatPak::GCAXArchive::CompareFile(std::mutex &printLock, const fs::path &file) const{
@@ -163,17 +173,19 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 }
 
 DatPak::GCAXArchive::GCAXArchive(
-		std::mutex &printLock, const uint16_t &datID, fs::path &&filePath,
-		std::unique_ptr<std::map<uint8_t, fs::path>> &&files
+		const uint16_t &datID,
+		fs::path &&filePath,
+		std::map<uint8_t, fs::path> &&files,
+		std::mutex &printLock
 ) : ID(datID), FilePath(std::move(filePath)), Files(std::move(files)),
     Warnings(0){
-	if(Files->empty()){
+	if(Files.empty()){
 		throw std::invalid_argument(fmt::format("List of files for archive \"{}\" was empty", FilePath.string()));
 	}
 
 	// First, we copy the data template over
 	std::vector<uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
-	const uint8_t file_count = Files->size();
+	const uint8_t file_count = Files.size();
 	const uint8_t delta_file_count = file_count - 1;
 
 	// Next, we add this archive's ID and index of the last file, plus some magic numbers
@@ -222,14 +234,14 @@ DatPak::GCAXArchive::GCAXArchive(
 	audio_data.insert(audio_data.end(), 20, '\0');
 
 	// Go to the last file in our (sorted) map and get the last ID that's specified
-	const int maxId = std::prev(Files->end())->first;
-	auto iter = Files->begin();
+	const int maxId = std::prev(Files.end())->first;
+	auto iter = Files.begin();
 	for(int i = 0; i <= maxId; i++){
 		const fs::path &wavFilePath = iter->second;
 		std::unique_ptr<std::basic_istream<char>> wavFile = std::make_unique<std::ifstream>(wavFilePath, std::ios_base::in | std::ios_base::binary);
 
 		{
-			const bool emptyFile = Files->count(i) == 0;
+			const bool emptyFile = !Files.contains(i);
 
 			// Check and make sure this wav file is valid
 			if(emptyFile){
@@ -239,8 +251,8 @@ DatPak::GCAXArchive::GCAXArchive(
 
 			} else {
 				// Check and make sure we have a valid entry in the map
-				if(iter != Files->end()){
-					iter++;
+				if(iter != Files.end()){
+					++iter;
 				}
 			}
 			if(emptyFile || !verifyWavFormat(printLock, wavFilePath, *dynamic_cast<std::ifstream *>(wavFile.get()))){

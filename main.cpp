@@ -1,36 +1,36 @@
+#include <cxxopts.hpp>
 #include <fstream>
 #include <list>
 #include <map>
 #include <thread>
-
 #include <fmt/color.h>
 #include <fmt/core.h>
-
-#include <cxxopts.hpp>
 
 #include "main.hpp"
 #include "state.hpp"
 
-int main(int argc, const char *argv[]){
+ProgramState programState; // NOLINT(*-avoid-non-const-global-variables)
+
+int main(const int argc, const char *argv[]){
 	using std::chrono::high_resolution_clock;
 	using std::chrono::duration_cast;
 	using std::chrono::duration;
 	using std::chrono::milliseconds;
 
-	const auto t1 = high_resolution_clock::now();
+	const auto start_time = high_resolution_clock::now();
 	const auto returnValue = processInput({argv, static_cast<size_t>(argc)});
-	const auto t2 = high_resolution_clock::now();
+	const auto end_time = high_resolution_clock::now();
 
-	/* Getting number of milliseconds as a double. */
-	const duration<double, std::milli> ms_double = t2 - t1;
+	if(returnValue == return_code::Ok && programState.verbose() != 0u) {
+		/* Getting number of milliseconds as a double. */
+		const duration<double, std::milli> ms_double = end_time - start_time;
 
-	fmt::print("\n{}ms\n", ms_double.count());
-	return returnValue;
+		fmt::print("\n{}ms\n", ms_double.count());
+	}
+	return std::to_underlying(returnValue);
 }
 
-ProgramState programState; // NOLINT(*-avoid-non-const-global-variables)
-
-int processInput(std::span<const char*> args) noexcept{
+return_code processInput(std::span<const char*> args) noexcept{
 	auto &[result, printLock] = programState;
 	std::atomic<uint_fast8_t> errors = 0;
 	std::atomic<uint_fast8_t> warnings = 0;
@@ -39,14 +39,20 @@ int processInput(std::span<const char*> args) noexcept{
 	try{
 		cxxopts::Options options("DatPak", "Creates GCAX sound archives to be used by Sonic Riders");
 		options.add_options()
-				       ("v,verbose", "Verbose output") // Implicitly bool
-				       ("f,force", "Force generation")
-				       ("c,config", "Config File path", cxxopts::value<std::vector<fs::path>>()->default_value({"config.txt"}))
-				       ("o,output", "Directory to write to", cxxopts::value<fs::path>()->default_value("Output/"));
+						("h,help", "Show help.")
+						("v,verbose", "Verbose output.") // Implicitly bool
+						("f,force", "Force generation.")
+						("c,config", "Config File path.", cxxopts::value<std::vector<fs::path>>())
+						("o,output", "Directory to write to.", cxxopts::value<fs::path>()->default_value("Output/"));
 		options.parse_positional({"config"});
-		result = options.parse(args.size(), args.data());
+		result = options.parse(static_cast<int>(args.size()), args.data());
+		if(result.count("help") != 0 || result.count("config") == 0) {
+			const std::scoped_lock writeLock{printLock};
+			fmt::print("{}", options.help());
+			return return_code::HelpShown;
+		}
 
-
+		// ReSharper disable once CppLocalVariableMayBeConst
 		std::vector<fs::path> configs = programState.config();
 		const fs::path &output = programState.output();
 
@@ -55,7 +61,7 @@ int processInput(std::span<const char*> args) noexcept{
 		std::vector<std::jthread> threads;
 
 		for(auto &config : configs){
-			threads.emplace_back([&](){
+			threads.emplace_back([&]{
 				ConfigState configState;
 				fs::path configParent;
 				if(fs::is_directory(config)){
@@ -75,8 +81,8 @@ int processInput(std::span<const char*> args) noexcept{
 				for(const auto &archive: configState.archives){
 					archive.WriteFile(config);
 					if(archive.getWarningCount() != 0u){
-						configState.warnings++;
-						configState.generated--;
+						++configState.warnings;
+						--configState.generated;
 					}
 				}
 				errors += configState.errors;
@@ -88,15 +94,15 @@ int processInput(std::span<const char*> args) noexcept{
 	}catch(cxxopts::exceptions::exception &err){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors, "{}\n", err.what());
-		return 1;
+		return return_code::CxxoptException;
 	}catch(fs::filesystem_error &err){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors, "{}\n", err.what());
-		return 2;
+		return return_code::FilesystemException;
 	}catch(std::exception &err){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors, "{}\n", err.what());
-		return -1;
+		return return_code::GeneralException;
 	}
 	const std::scoped_lock writeLock{printLock};
 	if(errors != 0u){
@@ -113,7 +119,7 @@ int processInput(std::span<const char*> args) noexcept{
 			fmt::print(okColors, "Successfully generated {} files\n", generated.load());
 		}
 	}
-	return 0;
+	return return_code::Ok;
 }
 
 void processMainConfigFile(ConfigState &state, const fs::path &config, const fs::path &configParent){
@@ -179,7 +185,7 @@ void processMainConfigFile(ConfigState &state, const fs::path &config, const fs:
 		}catch(std::exception &err){
 			const std::scoped_lock writeLock{programState.printLock};
 			fmt::print(errorColors, "{}\n", err.what());
-			state.errors++;
+			++state.errors;
 		}
 
 		mainConfigFile.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Go to the next line
@@ -195,10 +201,10 @@ void processVoiceFiles(ConfigState &state, const fs::path &parent, const fs::pat
 	if(errorCode){
 		modified = true;
 	}
-	std::ifstream config = std::ifstream(configFile);
+	auto config = std::ifstream(configFile);
 
-	auto fileMap = std::make_unique<std::map<uint8_t, fs::path>>();
-	std::map<uint8_t, fs::path> &files = *fileMap;
+	std::map<uint8_t, fs::path> files;
+	bool issueOccurred = false;
 
 	while(config.good()){
 		auto peek = config.peek();
@@ -230,6 +236,8 @@ void processVoiceFiles(ConfigState &state, const fs::path &parent, const fs::pat
 		if(!fs::exists(sound)){
 			const std::scoped_lock writeLock{programState.printLock};
 			fmt::print(errorColors, "{} isn't a valid file, skipping\n", sound.string());
+			issueOccurred = true;
+			modified = true;
 			continue;
 		}
 		if(files.contains(index)){
@@ -247,7 +255,7 @@ void processVoiceFiles(ConfigState &state, const fs::path &parent, const fs::pat
 	}
 
 	if(!modified){
-		state.skipped++;
+		++state.skipped;
 		return;
 	}
 
@@ -259,7 +267,10 @@ void processVoiceFiles(ConfigState &state, const fs::path &parent, const fs::pat
 		}
 	}
 
-	state.archives.emplace_back(programState.printLock, datID, std::move(filePath), std::move(fileMap));
+	auto &archive = state.archives.emplace_back(datID, std::move(filePath), std::move(files), programState.printLock);
+	if(issueOccurred){
+		archive.incrementWarning();
+	}
 
-	state.generated++;
+	++state.generated;
 }

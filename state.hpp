@@ -1,10 +1,11 @@
 #pragma once
 
+#include <atomic>
+#include <cxxopts.hpp>
 #include <filesystem>
 #include <list>
-#include <cxxopts.hpp>
 #include <mutex>
-#include <atomic>
+
 #include "gcaxArchive.hpp"
 
 namespace fs = std::filesystem;

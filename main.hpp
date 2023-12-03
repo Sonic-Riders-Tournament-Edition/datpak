@@ -1,11 +1,20 @@
 #pragma once
 
 #include <span>
+
 #include "state.hpp"
 
 namespace fs = std::filesystem;
 
-int processInput(std::span<const char*> args) noexcept;
+enum class return_code : std::int8_t{
+	GeneralException = -1,
+	Ok,
+	CxxoptException,
+	FilesystemException,
+	HelpShown,
+};
+
+return_code processInput(std::span<const char*> args) noexcept;
 
 void processMainConfigFile(ConfigState &state, const fs::path &config, const fs::path &configParent);
 
