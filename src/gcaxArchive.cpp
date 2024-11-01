@@ -28,7 +28,7 @@ namespace DatPak {
 
 void DatPak::GCAXArchive::WriteFile([[maybe_unused]] const fs::path &config) const{
 	auto warnings = Warnings;
-	if(warnings != 0u){
+	if(warnings != 0U){
 		const std::scoped_lock writeLock{programState.printLock};
 		fmt::print(warningColors,
 		           "Writing file with issues: {}\n\t0x{:X}\t0x{:X}\n",
@@ -50,7 +50,7 @@ void DatPak::GCAXArchive::WriteFile([[maybe_unused]] const fs::path &config) con
 		fmt::print(errorColors, "Unknown error writing file {}\n", fs::absolute(FilePath).string());
 		warnings++;
 	}
-	if(warnings != 0u){
+	if(warnings != 0U){
 		using namespace std::chrono;
 		// Clear the modified time if there were any issues, so it will always be regenerated
 #ifndef _WIN32
@@ -129,7 +129,7 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 	std::array<char, 4> buf{};
 	const std::string_view bufStr(buf.data(), 4);
 	wavFile.read(buf.data(), 4);
-	if(bufStr.compare(0, 4, "RIFF") != 0){
+	if(!bufStr.starts_with("RIFF")){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors,
 		           "Invalid WAV file: {}. Needs to be encoded in the RIFF format. Replacing with empty file.\n",
@@ -140,7 +140,7 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 	wavFile.seekg(0x8);
 
 	wavFile.read(buf.data(), 4);
-	if(bufStr.compare(0, 4, "WAVE") != 0){
+	if(!bufStr.starts_with("WAVE")){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors,
 		           "Invalid WAV file: {}. This is not a .wav file. Replacing with empty file.\n",
@@ -184,7 +184,7 @@ DatPak::GCAXArchive::GCAXArchive(
 	}
 
 	// First, we copy the data template over
-	std::vector<uint8_t> template_main_body(templateMainBody.begin(), templateMainBody.end());
+	std::vector template_main_body(templateMainBody.begin(), templateMainBody.end());
 	const uint8_t file_count = Files.size();
 	const uint8_t delta_file_count = file_count - 1;
 
@@ -248,7 +248,6 @@ DatPak::GCAXArchive::GCAXArchive(
 				const std::scoped_lock writeLock{printLock};
 				fmt::print(warningColors,
 				           "Warning: File for ID '0x{:02X}' is empty, Replacing with empty file\n", i);
-
 			} else {
 				// Check and make sure we have a valid entry in the map
 				if(iter != Files.end()){

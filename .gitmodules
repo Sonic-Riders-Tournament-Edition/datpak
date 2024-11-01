@@ -1,3 +1,3 @@
-[submodule "vcpkg"]
-	path = vcpkg
-	url = git@github.com:microsoft/vcpkg.git
+[submodule "lib/DspTool"]
+	path = lib/DspTool
+	url = git@github.com:lilggamegenius/DspTool.git
