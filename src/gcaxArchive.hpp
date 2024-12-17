@@ -18,8 +18,8 @@ struct ConfigState;
 
 namespace DatPak {
 	class GCAXArchive{
-		uint16_t ID; // Read only
-		fs::path FilePath; // Read only
+		uint16_t ID; // Read-only
+		fs::path FilePath; // Read-only
 		std::map<uint8_t, fs::path> Files;
 		std::vector<uint8_t> Dat;
 		uint_fast8_t Warnings;
@@ -43,7 +43,7 @@ namespace DatPak {
 		[[maybe_unused]] uint32_t start_offset;
 		[[maybe_unused]] int32_t unk;
 		[[maybe_unused]] uint32_t shifted_size;
-		std::array<int16_t, 16> coefficient;
+		std::array<int16_t, 16> coefficient; // NOLINT(*-magic-numbers)
 		std::array<int32_t, 3> unk2;
 		[[maybe_unused]] int32_t unk3;
 		[[maybe_unused]] uint16_t sample_rate;
@@ -94,9 +94,9 @@ namespace DatPak {
 
 	template<typename T>
 	void replaceIntBytearray(T& arr, const size_t& offset, const uint32_t& n){
-		TypeToBytes<uint32_t> nb{.u = n};
+		// NOLINTBEGIN
+		TypeToBytes nb{.u = n};
 		if constexpr (std::endian::native == std::endian::little) {
-			// NOLINT
 			arr[offset] = nb.u8[3];
 			arr[offset + 1] = nb.u8[2];
 			arr[offset + 2] = nb.u8[1];
@@ -107,19 +107,20 @@ namespace DatPak {
 			arr[offset + 2] = nb.u8[2];
 			arr[offset + 3] = nb.u8[3];
 		}
+		// NOLINTEND
 	}
 
 	template<typename T, size_t size = sizeof(T)>
-	constexpr T swap_to_big_endian(const T& u){
-		static_assert(CHAR_BIT == 8, "CHAR_BIT != 8");
-		if (size == 1) {
-			return u;
+	constexpr T swap_to_big_endian(const T& data){
+		static_assert(CHAR_BIT == 8, "CHAR_BIT != 8"); // NOLINT(*-magic-numbers)
+		if constexpr (size == 1) {
+			return data;
 		}
 		if constexpr (std::endian::native == std::endian::little) { // NOLINT
 			TypeToBytes<T> source;
 			TypeToBytes<T> dest;
 
-			source.u = u;
+			source.u = data;
 
 			for (size_t i = 0; i < size; i++) {
 				dest.u8[i] = source.u8[size - i - 1];
@@ -127,7 +128,7 @@ namespace DatPak {
 
 			return dest.u;
 		} else {
-			return u;
+			return data;
 		}
 	}
 

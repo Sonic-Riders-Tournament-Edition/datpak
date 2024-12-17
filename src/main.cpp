@@ -21,8 +21,8 @@ int main(const int argc, const char *argv[]){
 	const auto returnValue = processInput({argv, static_cast<size_t>(argc)});
 	const auto end_time = high_resolution_clock::now();
 
-	if(returnValue == return_code::Ok && programState.verbose() != 0u) {
-		/* Getting number of milliseconds as a double. */
+	if(returnValue == return_code::Ok && programState.verbose() != 0U) {
+		/* Getting the number of milliseconds as a double. */
 		const duration<double, std::milli> ms_double = end_time - start_time;
 
 		fmt::print("\n{}ms\n", ms_double.count());
@@ -30,7 +30,7 @@ int main(const int argc, const char *argv[]){
 	return std::to_underlying(returnValue);
 }
 
-return_code processInput(std::span<const char*> args) noexcept{
+return_code processInput(const std::span<const char*> args) noexcept{ // NOLINT(*-function-cognitive-complexity)
 	auto &[result, printLock] = programState;
 	std::atomic<uint_fast8_t> errors = 0;
 	std::atomic<uint_fast8_t> warnings = 0;
@@ -80,7 +80,7 @@ return_code processInput(std::span<const char*> args) noexcept{
 
 				for(const auto &archive: configState.archives){
 					archive.WriteFile(config);
-					if(archive.getWarningCount() != 0u){
+					if(archive.getWarningCount() != 0U){
 						++configState.warnings;
 						--configState.generated;
 					}
@@ -105,17 +105,17 @@ return_code processInput(std::span<const char*> args) noexcept{
 		return return_code::GeneralException;
 	}
 	const std::scoped_lock writeLock{printLock};
-	if(errors != 0u){
+	if(errors != 0U){
 		fmt::print(errorColors, "\nFailed to generate {} files\n", errors.load());
 	}
-	if(warnings != 0u){
+	if(warnings != 0U){
 		fmt::print(warningColors, "\nGenerated {} files with issues\n", warnings.load());
 	}
 	if(programState.verbose() > 0){
-		if(skipped != 0u){
+		if(skipped != 0U){
 			fmt::print(okColors, "{} files were unmodified\n", skipped.load());
 		}
-		if(generated != 0u){
+		if(generated != 0U){
 			fmt::print(okColors, "Successfully generated {} files\n", generated.load());
 		}
 	}

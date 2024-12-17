@@ -15,19 +15,19 @@ struct ProgramState{
 
 	mutable std::mutex printLock;
 
-	[[nodiscard]] inline auto verbose() const noexcept{
+	[[nodiscard]] auto verbose() const noexcept{
 		return result["verbose"].count();
 	}
 
-	[[nodiscard]] inline auto force() const noexcept{
+	[[nodiscard]] auto force() const noexcept{
 		return static_cast<bool>(result["force"].count());
 	}
 
-	[[nodiscard]] inline const auto& config() const{
+	[[nodiscard]] const auto& config() const{
 		return result["config"].as<std::vector<fs::path>>();
 	}
 
-	[[nodiscard]] inline const auto& output() const{
+	[[nodiscard]] const auto& output() const{
 		return result["output"].as<fs::path>();
 	}
 };
@@ -35,7 +35,7 @@ struct ProgramState{
 extern ProgramState programState; // NOLINT(*-avoid-non-const-global-variables)
 
 struct ConfigState{
-	std::list<DatPak::GCAXArchive> archives = std::list<DatPak::GCAXArchive>();
+	std::list<DatPak::GCAXArchive> archives;
 
 	std::atomic<uint_fast8_t> errors = 0;
 	[[maybe_unused]] std::atomic<uint_fast8_t> warnings = 0;

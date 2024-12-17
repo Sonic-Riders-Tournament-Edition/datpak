@@ -137,7 +137,7 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 		return false;
 	}
 
-	wavFile.seekg(0x8);
+	wavFile.seekg(0x8); // NOLINT(*-magic-numbers)
 
 	wavFile.read(buf.data(), 4);
 	if(!bufStr.starts_with("WAVE")){
@@ -148,10 +148,10 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 		return false;
 	}
 
-	wavFile.seekg(0x14);
+	wavFile.seekg(0x14); // NOLINT(*-magic-numbers)
 
 	uint16_t format{};
-	wavFile.read(reinterpret_cast<char *>(&format), 2);
+	wavFile.read(reinterpret_cast<char *>(&format), 2); // NOLINT(*-pro-type-reinterpret-cast)
 	if(format != 1){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors,
@@ -160,7 +160,7 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 		return false;
 	}
 
-	wavFile.read(reinterpret_cast<char *>(&format), 2);
+	wavFile.read(reinterpret_cast<char *>(&format), 2); // NOLINT(*-pro-type-reinterpret-cast)
 	if(format != 1){
 		const std::scoped_lock writeLock{printLock};
 		fmt::print(errorColors,
@@ -172,6 +172,7 @@ bool DatPak::verifyWavFormat(std::mutex &printLock, const fs::path &wavFilePath,
 	return true;
 }
 
+// NOLINTBEGIN(*-magic-numbers)
 DatPak::GCAXArchive::GCAXArchive(
 		const uint16_t &datID,
 		fs::path &&filePath,
@@ -196,8 +197,8 @@ DatPak::GCAXArchive::GCAXArchive(
 
 	// Now add the offsets for each entry in the file table
 	// todo: comment this better
-	for(unsigned int i = 0, sndfile_table_offset = (file_count * 4u) + 0xCu;
-	    i < file_count; i++, sndfile_table_offset += 6u){
+	for(unsigned int i = 0, sndfile_table_offset = (file_count * 4U) + 0xCU;
+	    i < file_count; i++, sndfile_table_offset += 6U){
 		PushBytes(template_main_body, swap_to_big_endian(sndfile_table_offset));
 	}
 
@@ -267,7 +268,7 @@ DatPak::GCAXArchive::GCAXArchive(
 
 		wavFile->seekg(0x18);
 
-		wavFile->read(reinterpret_cast<char *>(&sample_rate), sizeof(sample_rate));
+		wavFile->read(reinterpret_cast<char *>(&sample_rate), sizeof(sample_rate)); // NOLINT(*-pro-type-reinterpret-cast)
 		if(sample_rate != 44100){
 			const std::scoped_lock writeLock{printLock};
 			fmt::print(warningColors,
@@ -277,10 +278,10 @@ DatPak::GCAXArchive::GCAXArchive(
 			Warnings++;
 		}
 		wavFile->seekg(0x28);
-		wavFile->read(reinterpret_cast<char *>(&data_length), sizeof(data_length));
+		wavFile->read(reinterpret_cast<char *>(&data_length), sizeof(data_length)); // NOLINT(*-pro-type-reinterpret-cast)
 
 		std::vector<int16_t> inWav; inWav.resize(data_length);
-		wavFile->read(reinterpret_cast<char *>(inWav.data()), data_length);
+		wavFile->read(reinterpret_cast<char *>(inWav.data()), data_length); // NOLINT(*-pro-type-reinterpret-cast)
 
 		// Samples are stored as signed 16-bit, so the sample count is half of the available data
 		const uint32_t sample_count = data_length / 2;
@@ -304,8 +305,8 @@ DatPak::GCAXArchive::GCAXArchive(
 		};
 
 		// There's no way to copy an array during initialization, so we have to do it here
-		for(size_t x = 0; x < 16; x++){
-			fileEntry.coefficient[x] = swap_to_big_endian(info.coef[x]);
+		for(size_t index = 0; index < 16; index++){
+			fileEntry.coefficient[index] = swap_to_big_endian(info.coef[index]); // NOLINT(*-pro-bounds-constant-array-index)
 		}
 
 		// Add our file entry header data
@@ -365,3 +366,4 @@ DatPak::GCAXArchive::GCAXArchive(
 	// Align to the final length
 	Dat.resize(full_file_length);
 }
+// NOLINTEND(*-magic-numbers)
